@@ -10,7 +10,7 @@ export default function AgregarSala({ onClose }) {
           <div className="modal-estado">
             <label>Estado</label>
             <select className="select-estado">
-              <option value="activo">ESTADO</option>
+              <option value="activo">Activo</option>
               <option value="inactivo">Inactivo</option>
             </select>
           </div>
