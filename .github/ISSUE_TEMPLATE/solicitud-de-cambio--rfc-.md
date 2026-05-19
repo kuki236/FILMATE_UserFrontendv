@@ -2,7 +2,7 @@
 name: Solicitud de Cambio (RFC)
 about: Solicitud Formal de Cambio
 title: ''
-labels: ''
+labels: ['CCB-Pendiente']
 assignees: ''
 
 ---
