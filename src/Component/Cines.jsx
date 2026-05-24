@@ -5,36 +5,12 @@ import { MapPin, Clock, X } from 'lucide-react';
 const cinesData = [
   {
     id: 1,
-    nombre: 'Cinemark Jirón de la Unión',
+    nombre: 'Filmate Jirón de la Unión',
     direccion: 'Jr. de la Unión 870, Cercado de Lima, Lima, Perú',
     horarios: 'Lunes a Domingo – 10:00 a.m. a 10:00 p.m.',
     coordenadas: '-12.0464,-77.0283',
     mapsUrl: 'https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d3901.3549923756926!2d-77.02829!3d-12.04638!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x9105c8b7d5c5c5c5%3A0x5c5c5c5c5c5c5c5c!2sJr.%20de%20la%20Uni%C3%B3n%20870%2C%20Cercado%20de%20Lima!5e0!3m2!1ses!2spe!4v1234567890'
   },
-  {
-    id: 2,
-    nombre: 'Cinemark La Molina',
-    direccion: 'Av. La Molina 1234, La Molina, Lima, Perú',
-    horarios: 'Lunes a Domingo – 10:00 a.m. a 10:00 p.m.',
-    coordenadas: '-12.0968,-76.7591',
-    mapsUrl: 'https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d3901.2184758889977!2d-76.7591!3d-12.0968!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x9105d50e5c5c5c5d%3A0x5c5c5c5c5c5c5c5c!2sAv.%20La%20Molina%201234%2C%20La%20Molina!5e0!3m2!1ses!2spe!4v1234567890'
-  },
-  {
-    id: 3,
-    nombre: 'Cineplex Miraflores',
-    direccion: 'Av. Larco 123, Miraflores, Lima, Perú',
-    horarios: 'Lunes a Domingo – 10:00 a.m. a 10:00 p.m.',
-    coordenadas: '-12.1264,-77.0273',
-    mapsUrl: 'https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d3901.1234567890!2d-77.0273!3d-12.1264!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x9105b5e5c5c5c5c5%3A0x5c5c5c5c5c5c5c5c!2sAv.%20Larco%20123%2C%20Miraflores!5e0!3m2!1ses!2spe!4v1234567890'
-  },
-  {
-    id: 4,
-    nombre: 'Cineplanet San Miguel',
-    direccion: 'Av. Universitaria 5678, San Miguel, Lima, Perú',
-    horarios: 'Lunes a Domingo – 10:00 a.m. a 10:00 p.m.',
-    coordenadas: '-12.0667,-77.0867',
-    mapsUrl: 'https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d3901.0987654321!2d-77.0867!3d-12.0667!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x9105c2e5c5c5c5c5%3A0x5c5c5c5c5c5c5c5c!2sAv.%20Universitaria%205678%2C%20San%20Miguel!5e0!3m2!1ses!2spe!4v1234567890'
-  }
 ];
 
 export const Cines = () => {
@@ -66,7 +42,7 @@ export const Cines = () => {
                 
                 {/* Mapa */}
                 <div className="cursor-pointer" onClick={() => handleMapClick(cine)}>
-                  <div className="bg-slate-800 rounded-lg overflow-hidden h-64 hover:opacity-80 transition-opacity">
+                  <div className="bg-slate-800 rounded-lg overflow-hidden h-96 hover:opacity-80 transition-opacity">
                     <iframe
                       title={`Mapa de ${cine.nombre}`}
                       width="100%"
@@ -75,10 +51,9 @@ export const Cines = () => {
                       loading="lazy"
                       allowFullScreen=""
                       referrerPolicy="no-referrer-when-downgrade"
-                      src={`https://www.google.com/maps/embed/v1/place?key=AIzaSyCyPr1cQDf26eCNuZTFy2nupCChLrKD7ZM&q=${encodeURIComponent(cine.direccion)}`}
+                      src={`https://www.google.com/maps/embed/v1/place?key=APIPI&q=${encodeURIComponent(cine.direccion)}`}
                     ></iframe>
                   </div>
-                  <p className="text-xs text-slate-400 mt-2 text-center">Haz click en el mapa para ver en Google Maps</p>
                 </div>
 
                 {/* Información */}
@@ -151,7 +126,7 @@ export const Cines = () => {
                 loading="lazy"
                 allowFullScreen=""
                 referrerPolicy="no-referrer-when-downgrade"
-                src={`https://www.google.com/maps/embed/v1/place?key=AIzaSyCyPr1cQDf26eCNuZTFy2nupCChLrKD7ZM&q=${encodeURIComponent(selectedCine.direccion)}`}
+                src={`https://www.google.com/maps/embed/v1/place?key=APIPI&q=${encodeURIComponent(selectedCine.direccion)}`}
               ></iframe>
             </div>
 

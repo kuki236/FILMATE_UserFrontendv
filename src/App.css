@@ -28,6 +28,65 @@
   color: #61dafb;
 }
 
+html {
+  overflow-y: scroll;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: #475569 #020617;
+}
+
+body {
+  scrollbar-gutter: stable;
+  background-color: #020617;
+}
+
+html::-webkit-scrollbar,
+body::-webkit-scrollbar {
+  width: 12px;
+}
+
+html::-webkit-scrollbar-track,
+body::-webkit-scrollbar-track {
+  background: #020617;
+}
+
+html::-webkit-scrollbar-thumb,
+body::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, #475569, #2563eb);
+  border-radius: 9999px;
+  border: 3px solid #020617;
+}
+
+html::-webkit-scrollbar-thumb:hover,
+body::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(180deg, #64748b, #3b82f6);
+}
+
+.product-scrollbar {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.product-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+.product-card {
+  width: min(78vw, 240px);
+}
+
+@media (min-width: 640px) {
+  .product-card {
+    width: 220px;
+  }
+}
+
+@media (min-width: 1024px) {
+  .product-card {
+    width: 240px;
+  }
+}
+
 @keyframes App-logo-spin {
   from {
     transform: rotate(0deg);
