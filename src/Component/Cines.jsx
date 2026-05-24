@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import Header from './Header.jsx';
+import Footer from './Footer.jsx';
 import { MapPin, Clock, X } from 'lucide-react';
 
 const cinesData = [
@@ -25,11 +26,11 @@ export const Cines = () => {
   };
 
   return (
-    <div className="min-h-screen bg-slate-950">
+    <div className="min-h-screen bg-slate-950 flex flex-col">
       <Header />
       
       {/* Contenido Principal */}
-      <div className="w-full px-4 sm:px-6 lg:px-8 py-12">
+      <div className="flex-1 w-full px-4 sm:px-6 lg:px-8 py-12">
         <h1 className="text-4xl font-bold text-white text-center mb-12">Nuestros locales</h1>
         
         <div className="space-y-8">
@@ -138,6 +139,8 @@ export const Cines = () => {
           </div>
         </div>
       )}
+
+      <Footer />
     </div>
   );
 };

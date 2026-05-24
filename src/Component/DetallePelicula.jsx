@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Star, Play, X } from 'lucide-react';
 import Header from './Header.jsx';
+import Footer from './Footer.jsx';
 import { useLocation, useNavigate } from 'react-router-dom';
 
 export const DetallePelicula = () => {
@@ -17,9 +18,9 @@ export const DetallePelicula = () => {
 
     if (!pelicula) {
         return (
-            <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 pb-16">
+            <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 flex flex-col">
                 <Header />
-                <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-20 text-center">
+                <div className="flex-1 max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-20 text-center w-full">
                     <h2 className="text-3xl font-bold text-white mb-4">
                         No se encontró información de la película
                     </h2>
@@ -129,7 +130,7 @@ export const DetallePelicula = () => {
     const videoId = getYouTubeVideoId(trailerUrl);
 
     return (
-        <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 pb-16">
+        <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 flex flex-col">
             <Header />
 
             {/* BOTÓN VOLVER*/}
@@ -143,7 +144,7 @@ export const DetallePelicula = () => {
                 </button>
             </div>
 
-            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+            <div className="flex-1 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12 w-full">
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
 
                     {/* Columna Izquierda */}
@@ -348,6 +349,8 @@ export const DetallePelicula = () => {
                     </div>
                 )}
             </div>
+
+            <Footer />
 
             <style jsx>{`
                 @keyframes scaleIn {

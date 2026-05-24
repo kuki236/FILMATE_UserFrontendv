@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Header from './Header.jsx';
+import Footer from './Footer.jsx';
 import { AlertTriangle, ArrowLeft, Banknote, CheckCircle2, CreditCard, Minus, Plus, ShoppingCart, Smartphone, X } from 'lucide-react';
 import { QRCodeCanvas } from 'qrcode.react';
 import jsPDF from 'jspdf';
@@ -544,10 +545,10 @@ export const Dulceria = () => {
   );
 
   return (
-    <div className="min-h-screen bg-slate-950">
+    <div className="min-h-screen bg-slate-950 flex flex-col">
       <Header />
 
-      <main className="w-full px-4 py-12 sm:px-6 lg:px-8">
+      <main className="flex-1 w-full px-4 py-12 sm:px-6 lg:px-8">
         <div className="mx-auto max-w-7xl">
           <h1 className="mb-12 text-center text-4xl font-bold text-white">Elige tus snacks favoritos</h1>
 
@@ -898,6 +899,8 @@ export const Dulceria = () => {
           </div>
         </div>
       )}
+
+      <Footer />
     </div>
   );
 };
