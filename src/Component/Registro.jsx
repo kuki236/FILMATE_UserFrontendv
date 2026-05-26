@@ -3,6 +3,39 @@ import { User, Mail, Lock, MapPin, Phone, CheckCircle } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import { registerUser } from './filmateApi';
 
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const FULL_NAME_REGEX = /^[A-Za-zÁÉÍÓÚÜÑáéíóúüñ\s]+$/;
+const USERNAME_REGEX = /^[A-Za-z0-9_]{3,20}$/;
+const PHONE_REGEX = /^[0-9]{7,15}$/;
+const REGISTRY_KEY = 'filmate-registered-users';
+
+const readRegistry = () => {
+  try {
+    const raw = localStorage.getItem(REGISTRY_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+};
+
+const saveRegistryEntry = ({ nombreUsuario, telefono, email }) => {
+  try {
+    const current = readRegistry();
+    const next = [
+      ...current,
+      {
+        nombreUsuario: nombreUsuario.trim().toLowerCase(),
+        telefono: telefono.trim(),
+        email: email.trim().toLowerCase(),
+      },
+    ];
+    localStorage.setItem(REGISTRY_KEY, JSON.stringify(next));
+  } catch {
+    // Si localStorage falla, el registro sigue funcionando.
+  }
+};
+
 export const Registro = () => {
   const navigate = useNavigate();
   const [formData, setFormData] = useState({
@@ -42,18 +75,69 @@ export const Registro = () => {
     };
   };
 
+  const validateForm = () => {
+    const fullName = formData.nombreCompleto.trim();
+    const username = formData.nombreUsuario.trim();
+    const email = formData.email.trim();
+    const password = formData.contrasena;
+    const phone = formData.telefono.trim();
+
+    if (!fullName) return 'Completa tu nombre completo.';
+    if (!FULL_NAME_REGEX.test(fullName)) {
+      return 'El nombre completo solo puede contener letras y espacios.';
+    }
+
+    if (!username) return 'El nombre de usuario es obligatorio.';
+    if (!USERNAME_REGEX.test(username)) {
+      return 'El nombre de usuario debe tener entre 3 y 20 caracteres y solo puede usar letras, números y guion bajo.';
+    }
+
+    if (!email) return 'Completa tu correo electrónico.';
+    if (!EMAIL_REGEX.test(email)) {
+      return 'Ingresa un correo electrónico válido. Ejemplo: nombre@correo.com';
+    }
+
+    if (!password) return 'Completa tu contraseña.';
+    if (password.length < 6) {
+      return 'La contraseña debe tener al menos 6 caracteres.';
+    }
+
+    if (phone) {
+      if (!PHONE_REGEX.test(phone)) {
+        return 'El teléfono solo puede contener números y debe tener entre 7 y 15 dígitos.';
+      }
+    }
+
+    const registry = readRegistry();
+    const normalizedUsername = username.toLowerCase();
+    const normalizedPhone = phone;
+
+    if (registry.some((item) => item.nombreUsuario === normalizedUsername)) {
+      return 'Ya existe un usuario registrado con ese nombre de usuario.';
+    }
+
+    if (phone && registry.some((item) => item.telefono === normalizedPhone)) {
+      return 'Ya existe un teléfono registrado con ese número.';
+    }
+
+    return '';
+  };
+
   const handleSubmit = async () => {
     setError('');
+
+    const validationMessage = validateForm();
+    if (validationMessage) {
+      setError(validationMessage);
+      return;
+    }
 
     const fullName = formData.nombreCompleto.trim();
     const correo = formData.email.trim();
     const password = formData.contrasena;
-
-    if (!fullName || !correo || !password) {
-      setError('Completa nombre, correo y contraseña.');
-      return;
-    }
-
+    const nombreUsuario = formData.nombreUsuario.trim();
+    const telefono = formData.telefono.trim();
+    const direccion = formData.direccion.trim();
     const { nombres, apellidos } = splitFullName(fullName);
 
     try {
@@ -64,6 +148,15 @@ export const Registro = () => {
         apellidos,
         correo,
         password,
+        nombreUsuario,
+        telefono,
+        direccion,
+      });
+
+      saveRegistryEntry({
+        nombreUsuario,
+        telefono,
+        email: correo,
       });
 
       setShowSuccess(true);
@@ -72,7 +165,7 @@ export const Registro = () => {
         navigate('/menuPrincipal');
       }, 2000);
     } catch (err) {
-      setError(err.message || 'No se pudo completar el registro.');
+      setError(err?.message || 'No se pudo completar el registro.');
     } finally {
       setLoading(false);
     }
@@ -201,7 +294,7 @@ export const Registro = () => {
                   value={formData.direccion}
                   onChange={handleChange}
                   className="w-full px-4 py-3.5 bg-slate-700/50 border border-slate-600 rounded-xl text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-transparent transition-all"
-                  placeholder=""
+                  placeholder="Ingresa tu dirección (opcional)"
                 />
               </div>
 
@@ -216,7 +309,7 @@ export const Registro = () => {
                   value={formData.telefono}
                   onChange={handleChange}
                   className="w-full px-4 py-3.5 bg-slate-700/50 border border-slate-600 rounded-xl text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-transparent transition-all"
-                  placeholder=""
+                  placeholder="Ingresa tu teléfono (opcional)"
                 />
               </div>
             </div>

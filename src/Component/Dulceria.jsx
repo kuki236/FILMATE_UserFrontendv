@@ -5,6 +5,8 @@ import Footer from './Footer.jsx';
 import { AlertTriangle, ArrowLeft, Banknote, CheckCircle2, CreditCard, Minus, Plus, ShoppingCart, Smartphone, X } from 'lucide-react';
 import { QRCodeCanvas } from 'qrcode.react';
 import jsPDF from 'jspdf';
+import { checkoutOrder } from './filmateApi';
+import { getAuthSession } from './authSession';
 
 const FALLBACK_IMAGE = 'https://placehold.co/400x400/0f172a/f8fafc?text=Filmate';
 
@@ -51,8 +53,6 @@ const categoryLabels = {
   bebidas: 'Bebidas',
 };
 
-const DEFAULT_TARIFF_ID = 1;
-const DEFAULT_TARIFF_NAME = 'General';
 const DEFAULT_TARIFF_PRICE = 22.5;
 
 const paymentOptions = [
@@ -82,7 +82,7 @@ const paymentOptions = [
   },
 ];
 
-function TicketContent({ carrito, total, pedidoNumber, fechaCompra, bookingContext }) {
+function TicketContent({ carrito, total, pedidoNumber, fechaCompra, bookingContext, reservationId }) {
   return (
     <div className="overflow-hidden rounded-3xl border border-slate-700 bg-slate-950 text-white shadow-2xl">
       <div className="border-b border-slate-800 bg-gradient-to-r from-slate-900 via-slate-950 to-slate-900 px-6 py-5">
@@ -108,9 +108,6 @@ function TicketContent({ carrito, total, pedidoNumber, fechaCompra, bookingConte
             <p className="mt-2 text-sm text-slate-300">
               Asientos: {bookingContext.asientos?.length ? bookingContext.asientos.join(', ') : 'Sin asientos seleccionados'}
             </p>
-            <p className="mt-2 text-sm text-slate-300">
-              Tarifa aplicada: {DEFAULT_TARIFF_NAME} (id {DEFAULT_TARIFF_ID}) - S/. {DEFAULT_TARIFF_PRICE.toFixed(2)}
-            </p>
           </div>
         )}
         <div className="rounded-2xl border border-slate-800 bg-slate-900 p-4">
@@ -118,6 +115,11 @@ function TicketContent({ carrito, total, pedidoNumber, fechaCompra, bookingConte
             <div>
               <p className="text-sm text-slate-400">Numero de pedido</p>
               <p className="text-2xl font-bold text-white">{pedidoNumber}</p>
+              {reservationId && (
+                <p className="mt-1 text-xs uppercase tracking-[0.2em] text-blue-300">
+                  Reserva #{reservationId}
+                </p>
+              )}
             </div>
             <div className="text-right">
               <p className="text-sm text-slate-400">Fecha</p>
@@ -187,6 +189,9 @@ export const Dulceria = () => {
   const [showNotice, setShowNotice] = useState(false);
   const [isProcessingPayment, setIsProcessingPayment] = useState(false);
   const [isGeneratingPDF, setIsGeneratingPDF] = useState(false);
+  const [checkoutError, setCheckoutError] = useState('');
+  const [checkoutResult, setCheckoutResult] = useState(null);
+  const [skipSnacksForReservation, setSkipSnacksForReservation] = useState(false);
   const [lastAddedId, setLastAddedId] = useState(null);
   const [selectedPaymentMethod, setSelectedPaymentMethod] = useState('tarjeta');
   const [pendingExitAction, setPendingExitAction] = useState(null);
@@ -224,15 +229,18 @@ export const Dulceria = () => {
   const location = useLocation();
   const bookingContext = location.state || null;
   const isSeatFlow = Boolean(bookingContext?.pelicula);
+  const authSession = getAuthSession();
   const pageTitle = isSeatFlow ? 'Completa tu compra' : 'Elige tus snacks favoritos';
   const pageSubtitle = isSeatFlow
-    ? `Tu compra incluye una reserva de película y asientos seleccionados. Tarifa aplicada: ${DEFAULT_TARIFF_NAME} (id ${DEFAULT_TARIFF_ID}).`
+    ? 'Tu compra incluye una reserva de película y asientos seleccionados.'
     : 'Explora combos, popcorn y bebidas para armar tu pedido.';
 
   const snacksTotal = carrito.reduce((sum, item) => sum + item.precio * item.cantidad, 0);
   const seatsCount = bookingContext?.asientos?.length || 0;
   const reservationTotal = isSeatFlow ? seatsCount * DEFAULT_TARIFF_PRICE : 0;
   const total = snacksTotal + reservationTotal;
+  const paymentSnackTotal = isSeatFlow && skipSnacksForReservation ? 0 : snacksTotal;
+  const paymentTotal = isSeatFlow ? reservationTotal + paymentSnackTotal : total;
 
   useEffect(() => {
     try {
@@ -521,6 +529,15 @@ export const Dulceria = () => {
   };
 
   const iniciarPago = () => {
+    setCheckoutError('');
+    setSkipSnacksForReservation(false);
+    setShowVerification(false);
+    setShowPayment(true);
+  };
+
+  const omitirSnacks = () => {
+    setCheckoutError('');
+    setSkipSnacksForReservation(true);
     setShowVerification(false);
     setShowPayment(true);
   };
@@ -528,10 +545,49 @@ export const Dulceria = () => {
   const confirmarPago = async () => {
     if (isProcessingPayment) return;
 
+    if (isSeatFlow) {
+      const userId = authSession?.user?.id_usuario;
+      const seatIds = bookingContext?.seatIds || [];
+
+      if (!userId) {
+        setCheckoutError('Debes iniciar sesión para completar una reserva.');
+        return;
+      }
+
+      if (!bookingContext?.id_funcion || seatIds.length === 0) {
+        setCheckoutError('No se encontraron asientos o función válidos para reservar.');
+        return;
+      }
+
+      try {
+        setCheckoutError('');
+        setIsProcessingPayment(true);
+
+        const response = await checkoutOrder({
+          id_usuario: userId,
+          id_funcion: bookingContext.id_funcion,
+          ids_asientos: seatIds,
+          id_tarifa: 1,
+          metodo_pago: selectedPaymentMethod,
+          snacks: (skipSnacksForReservation ? [] : carrito).map((item) => ({
+            id_producto: item.id,
+            cantidad: item.cantidad,
+          })),
+        });
+
+        setCheckoutResult(response);
+        setShowPayment(false);
+        setShowSuccess(true);
+      } catch (err) {
+        setCheckoutError(err?.message || 'No se pudo completar la reserva.');
+      } finally {
+        setIsProcessingPayment(false);
+      }
+      return;
+    }
+
     setIsProcessingPayment(true);
-
     await new Promise((resolve) => window.setTimeout(resolve, 1800));
-
     setIsProcessingPayment(false);
     setShowPayment(false);
     setShowSuccess(true);
@@ -657,9 +713,6 @@ export const Dulceria = () => {
                   <p className="text-lg font-bold text-white">
                     {bookingContext.asientos?.length ? bookingContext.asientos.join(', ') : 'Sin asientos'}
                   </p>
-                  <p className="mt-2 text-xs uppercase tracking-[0.2em] text-blue-200">
-                    Tarifa general fija: id {DEFAULT_TARIFF_ID}
-                  </p>
                 </div>
               </div>
             </div>
@@ -683,7 +736,7 @@ export const Dulceria = () => {
                   <p className="text-slate-400">Tu carrito esta vacio</p>
                   {isSeatFlow && (
                     <button
-                      onClick={iniciarPago}
+                      onClick={omitirSnacks}
                       className="w-full rounded-lg bg-blue-600 py-3 font-semibold text-white transition-colors hover:bg-blue-700"
                     >
                       Omitir snacks
@@ -727,7 +780,7 @@ export const Dulceria = () => {
                     {isSeatFlow && (
                       <div className="space-y-2 rounded-xl border border-slate-700 bg-slate-800 p-4 text-sm text-slate-300">
                         <div className="flex items-center justify-between">
-                          <span>Asientos ({seatsCount} x tarifa general)</span>
+                          <span>Asientos ({seatsCount})</span>
                           <span>S/. {reservationTotal.toFixed(2)}</span>
                         </div>
                         <div className="flex items-center justify-between">
@@ -741,7 +794,7 @@ export const Dulceria = () => {
                   <div className="grid grid-cols-1 gap-3">
                     {isSeatFlow && (
                       <button
-                        onClick={iniciarPago}
+                        onClick={omitirSnacks}
                         className="w-full rounded-lg bg-blue-600 py-3 font-semibold text-white transition-colors hover:bg-blue-700"
                       >
                         Omitir snacks
@@ -862,16 +915,24 @@ export const Dulceria = () => {
             <div className="px-4 py-5 sm:px-6">
               <div className="mb-4 rounded-xl border border-blue-500/30 bg-blue-500/10 p-4">
                 <p className="text-sm text-slate-300">Total a cobrar</p>
-                <p className="text-3xl font-bold text-white">S/. {total.toFixed(2)}</p>
-                <p className="mt-2 text-xs uppercase tracking-[0.2em] text-blue-200">
-                  Tarifa general: {DEFAULT_TARIFF_NAME} (id {DEFAULT_TARIFF_ID})
-                </p>
+                <p className="text-3xl font-bold text-white">S/. {paymentTotal.toFixed(2)}</p>
                 {isSeatFlow && (
                   <p className="mt-2 text-sm text-slate-200">
                     Asientos: {seatsCount} · Subtotal asientos: S/. {reservationTotal.toFixed(2)}
                   </p>
                 )}
+                {isSeatFlow && skipSnacksForReservation && (
+                  <p className="mt-2 text-sm font-semibold text-emerald-300">
+                    Snacks omitidos: no se cobrarán en esta compra.
+                  </p>
+                )}
               </div>
+
+              {checkoutError && (
+                <div className="mb-4 rounded-xl border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-100">
+                  {checkoutError}
+                </div>
+              )}
 
               {bookingContext && (
                 <div className="mb-4 rounded-xl border border-slate-700 bg-slate-800 p-4">
@@ -882,9 +943,6 @@ export const Dulceria = () => {
                   </p>
                   <p className="mt-2 text-sm text-slate-300">
                     {bookingContext.asientos?.length ? bookingContext.asientos.join(', ') : 'Sin asientos'}
-                  </p>
-                  <p className="mt-2 text-xs uppercase tracking-[0.2em] text-blue-200">
-                    Tarifa aplicada: {DEFAULT_TARIFF_NAME} (id {DEFAULT_TARIFF_ID})
                   </p>
                 </div>
               )}
@@ -1053,6 +1111,7 @@ export const Dulceria = () => {
                   pedidoNumber={pedidoNumber}
                   fechaCompra={fechaCompra}
                   bookingContext={bookingContext}
+                  reservationId={checkoutResult?.id_reserva}
                 />
               </div>
 
