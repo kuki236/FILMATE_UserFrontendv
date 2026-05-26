@@ -6,6 +6,28 @@ import { useNavigate } from 'react-router-dom';
 import { peliculas } from './peliculas';
 import { getMovies } from './filmateApi';
 
+const FALLBACK_MEDIA_IMAGE =
+    "data:image/svg+xml;charset=UTF-8," +
+    encodeURIComponent(`
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 1200">
+            <defs>
+                <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+                    <stop offset="0%" stop-color="#0f172a" />
+                    <stop offset="50%" stop-color="#1e293b" />
+                    <stop offset="100%" stop-color="#111827" />
+                </linearGradient>
+            </defs>
+            <rect width="800" height="1200" fill="url(#g)" />
+            <circle cx="400" cy="430" r="120" fill="#e11d48" opacity="0.18" />
+            <text x="400" y="590" text-anchor="middle" fill="#e2e8f0" font-family="Arial, Helvetica, sans-serif" font-size="42" font-weight="700">Imagen no disponible</text>
+        </svg>
+    `);
+
+const handleImageFallback = (event) => {
+    event.currentTarget.onerror = null;
+    event.currentTarget.src = FALLBACK_MEDIA_IMAGE;
+};
+
 export const MenuPrincipal = () => {
     const navigate = useNavigate();
     const [peliculasData, setPeliculasData] = useState(peliculas);
@@ -107,6 +129,7 @@ export const MenuPrincipal = () => {
                                         src={pelicula.imagenPoster || pelicula.imagen}
                                         alt={pelicula.titulo}
                                         className="w-full h-[550px] object-cover group-hover:scale-110 transition-transform duration-500"
+                                        onError={handleImageFallback}
                                     />
                                     <div className="absolute inset-0 bg-gradient-to-t from-slate-900 via-slate-900/50 to-transparent"></div>
                                 </div>
@@ -151,6 +174,7 @@ export const MenuPrincipal = () => {
                                             src={pelicula.imagenPoster || pelicula.imagen}
                                             alt={pelicula.titulo}
                                             className="w-full h-[550px] object-cover group-hover:scale-110 transition-transform duration-500"
+                                            onError={handleImageFallback}
                                         />
                                         <div className="absolute inset-0 bg-gradient-to-t from-slate-900 via-slate-900/40 to-transparent"></div>
                                     </div>

@@ -1,9 +1,34 @@
 import React, { useState, useEffect } from 'react';
-import { ArrowLeft, ArrowRight, Armchair, Star, Play, X } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Armchair, Clock3, Clapperboard, Star, Play, X } from 'lucide-react';
 import Header from './Header.jsx';
 import Footer from './Footer.jsx';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { getCinemas, getMovieById, getSeatMap, getShowtimesByCinema } from './filmateApi';
+
+const FALLBACK_MEDIA_IMAGE =
+    "data:image/svg+xml;charset=UTF-8," +
+    encodeURIComponent(`
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 1200">
+            <defs>
+                <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+                    <stop offset="0%" stop-color="#0f172a" />
+                    <stop offset="50%" stop-color="#1e293b" />
+                    <stop offset="100%" stop-color="#111827" />
+                </linearGradient>
+            </defs>
+            <rect width="800" height="1200" fill="url(#g)" />
+            <rect x="70" y="80" width="660" height="1040" rx="36" fill="none" stroke="#475569" stroke-width="6" stroke-dasharray="18 16" />
+            <circle cx="400" cy="430" r="120" fill="#e11d48" opacity="0.18" />
+            <path d="M305 450l70-70 60 60 55-55 105 105v95H305z" fill="#cbd5e1" opacity="0.75" />
+            <path d="M280 790h240c48 0 86-38 86-86v-36l-132-132-65 65-95-95-134 134v64c0 28 22 50 50 50z" fill="#cbd5e1" opacity="0.45" />
+            <text x="400" y="1000" text-anchor="middle" fill="#e2e8f0" font-family="Arial, Helvetica, sans-serif" font-size="40" font-weight="700">Imagen no disponible</text>
+        </svg>
+    `);
+
+const handleImageFallback = (event) => {
+    event.currentTarget.onerror = null;
+    event.currentTarget.src = FALLBACK_MEDIA_IMAGE;
+};
 
 export const DetallePelicula = () => {
     const { movieId } = useParams();
@@ -89,7 +114,7 @@ export const DetallePelicula = () => {
                         try {
                             const response = await getShowtimesByCinema(cinema.id);
                             const funciones = Array.isArray(response?.funciones)
-                                ? response.funciones.filter((funcion) => funcion.id_pelicula === pelicula.id)
+                                ? response.funciones.filter((funcion) => Number(funcion.id_pelicula) === Number(pelicula.id))
                                 : [];
 
                             return {
@@ -166,12 +191,6 @@ export const DetallePelicula = () => {
         );
     }
 
-    const sedes = [
-        { id: 1, nombre: "Sede Lima Centro", horarios: ["11:30", "13:45", "16:00", "19:30"] },
-        { id: 2, nombre: "Sede La Molina", horarios: ["13:00", "18:45", "20:00"] },
-        { id: 3, nombre: "Sede Mall del Sur", horarios: ["20:30", "23:00"] }
-    ];
-
     const resenas = [
         {
             id: 1,
@@ -235,15 +254,15 @@ export const DetallePelicula = () => {
         </div>
     );
 
-    const poster = pelicula.imagenPoster || pelicula.imagen;
-    const trailerImg = pelicula.imagenTrailer || pelicula.imagenPoster || pelicula.imagen;
+    const poster = pelicula.imagenPoster || pelicula.imagen || FALLBACK_MEDIA_IMAGE;
+    const trailerImg = pelicula.imagenTrailer || pelicula.imagenPoster || pelicula.imagen || FALLBACK_MEDIA_IMAGE;
     const titulo = pelicula.titulo || 'Película';
     const generos = Array.isArray(pelicula.generos) && pelicula.generos.length
         ? pelicula.generos
         : pelicula.genero
             ? String(pelicula.genero).split(',').map((item) => item.trim()).filter(Boolean)
             : [];
-    const genero = generos.length ? generos.join(', ') : 'GÃ©nero no disponible';
+    const genero = generos.length ? generos.join(', ') : 'Género no disponible';
     const duracion = pelicula.duracion || '';
     const clasificacion = pelicula.clasificacion || '';
     const rating = pelicula.rating || 0;
@@ -434,7 +453,7 @@ export const DetallePelicula = () => {
                                     </div>
 
                                     <div className="flex items-center gap-3 text-[#5fa6ff]">
-                                        <span className="text-2xl sm:text-3xl">🕒</span>
+                                        <Clock3 className="h-6 w-6 sm:h-8 sm:w-8" />
                                         <p className="text-lg font-bold sm:text-2xl">
                                             {selectedShow.fecha_hora_inicio
                                                 ? new Date(selectedShow.fecha_hora_inicio).toLocaleTimeString('es-PE', {
@@ -446,7 +465,7 @@ export const DetallePelicula = () => {
                                     </div>
 
                                     <div className="flex items-center gap-3 text-[#5fa6ff]">
-                                        <span className="text-2xl sm:text-3xl">🎬</span>
+                                        <Clapperboard className="h-6 w-6 sm:h-8 sm:w-8" />
                                         <p className="text-lg font-bold sm:text-2xl">{selectedShow.nombre_sala || selectedShow.sala || 'Sala por definir'}</p>
                                     </div>
                                 </div>
@@ -573,7 +592,7 @@ export const DetallePelicula = () => {
                     {/* Columna Izquierda */}
                     <div className="lg:col-span-1 space-y-6 order-1">
                         <div className="bg-slate-800/30 backdrop-blur-sm rounded-3xl overflow-hidden border border-slate-700/50">
-                            <img src={poster} alt={titulo} className="w-full h-[600px] object-cover" />
+                            <img src={poster} alt={titulo} className="w-full h-[600px] object-cover" onError={handleImageFallback} />
                             <div className="p-6 text-center">
                                 <h2 className="text-2xl font-bold text-white mb-2">{titulo}</h2>
                                 <p className="text-gray-300 mb-4">
@@ -625,7 +644,7 @@ export const DetallePelicula = () => {
                         {/* Trailer desktop */}
                         <div className="bg-slate-800/30 backdrop-blur-sm rounded-3xl overflow-hidden border border-slate-700/50 hidden lg:block">
                             <div className="relative group cursor-pointer" onClick={() => videoId && setShowTrailer(true)}>
-                                <img src={trailerPreview} alt="Vista previa del tráiler" className="w-full h-[400px] object-cover" />
+                                <img src={trailerPreview} alt="Vista previa del tráiler" className="w-full h-[400px] object-cover" onError={handleImageFallback} />
                                 <div className="absolute inset-0 bg-black/40 flex items-center justify-center">
                                     <div className="text-center">
                                         <div className="w-20 h-20 rounded-full border-4 border-white flex items-center justify-center mb-4 mx-auto group-hover:scale-110 transition-transform">
@@ -677,29 +696,16 @@ export const DetallePelicula = () => {
                                     </div>
                                 ))
                             ) : (
-                                sedes.map((sede) => (
-                                    <div key={sede.id} className="bg-gradient-to-r from-slate-700/30 to-slate-800/30 backdrop-blur-sm rounded-3xl p-6 border border-slate-700/50">
-                                        <h3 className="text-white text-xl font-bold mb-4">{sede.nombre}</h3>
-                                        <div className="flex flex-wrap gap-3">
-                                            {sede.horarios.map((horario, index) => (
-                                                <button
-                                                    key={index}
-                                                    onClick={() => openSeatSelector({ id: sede.id, nombre_cine: sede.nombre }, { horario, nombre_sala: `SALA ${9 + sede.id}` })}
-                                                    className="px-6 py-2 bg-red-500 hover:bg-red-600 text-white font-bold rounded-full transition-all duration-300 shadow-lg hover:scale-105"
-                                                >
-                                                    {horario}
-                                                </button>
-                                            ))}
-                                        </div>
-                                    </div>
-                                ))
+                                <div className="rounded-3xl border border-slate-700/50 bg-slate-800/30 p-6 text-slate-200">
+                                    No hay funciones disponibles para esta película por el momento.
+                                </div>
                             )}
                         </div>
 
                         {/* Trailer móvil */}
                         <div className="bg-slate-800/30 backdrop-blur-sm rounded-3xl overflow-hidden border border-slate-700/50 lg:hidden">
                             <div className="relative group cursor-pointer" onClick={() => videoId && setShowTrailer(true)}>
-                                <img src={trailerPreview} alt="Vista previa del tráiler" className="w-full h-[400px] object-cover" />
+                                <img src={trailerPreview} alt="Vista previa del tráiler" className="w-full h-[400px] object-cover" onError={handleImageFallback} />
                                 <div className="absolute inset-0 bg-black/40 flex items-center justify-center">
                                     <div className="text-center">
                                         <div className="w-20 h-20 rounded-full border-4 border-white flex items-center justify-center mb-4 mx-auto group-hover:scale-110 transition-transform">
@@ -788,6 +794,16 @@ export const DetallePelicula = () => {
                                 allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
                                 allowFullScreen
                             ></iframe>
+                            {trailerUrl && (
+                                <a
+                                    href={trailerUrl}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="absolute bottom-4 left-4 rounded-full bg-black/60 px-4 py-2 text-sm font-semibold text-white backdrop-blur-sm transition-colors hover:bg-black/80"
+                                >
+                                    Abrir en YouTube
+                                </a>
+                            )}
                         </div>
                     </div>
                 )}
