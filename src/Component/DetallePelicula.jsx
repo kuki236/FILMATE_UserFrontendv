@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { ArrowLeft, ArrowRight, Armchair, Clock3, Clapperboard, Star, Play, X } from 'lucide-react';
 import Header from './Header.jsx';
 import Footer from './Footer.jsx';
@@ -48,6 +48,9 @@ export const DetallePelicula = () => {
     const [movieError, setMovieError] = useState('');
     const location = useLocation();
     const navigate = useNavigate();
+    const seatMapScrollRef = useRef(null);
+    const seatRowScrollRefs = useRef({});
+    const seatSizes = useRef({});
 
     const pelicula = movieDetails || location.state;
 
@@ -151,6 +154,27 @@ export const DetallePelicula = () => {
             isMounted = false;
         };
     }, [pelicula?.id]);
+
+    useEffect(() => {
+        if (!selectedShow) return;
+
+        const restoreScroll = () => {
+            const container = seatMapScrollRef.current;
+            if (!container) return;
+
+            const currentTop = seatSizes.current.__scrollTop ?? container.scrollTop;
+            container.scrollTop = currentTop;
+
+            const rowScrolls = seatSizes.current.__rowScrolls || {};
+            Object.entries(seatRowScrollRefs.current).forEach(([row, node]) => {
+                if (!node) return;
+                node.scrollLeft = rowScrolls[row] ?? node.scrollLeft;
+            });
+        };
+
+        const raf = window.requestAnimationFrame(restoreScroll);
+        return () => window.cancelAnimationFrame(raf);
+    }, [selectedSeats, selectedShow]);
 
     if (movieLoading && !movieDetails && !location.state) {
         return (
@@ -356,10 +380,17 @@ export const DetallePelicula = () => {
     }, {});
     const backendSeatRows = Object.entries(seatMapByRow).sort(([a], [b]) => a.localeCompare(b, 'es', { numeric: true }));
 
-    const renderSeat = (seat) => {
+    const renderSeat = (seat, seatSize = 36) => {
         const seatKey = seat.id_asiento ?? `${seat.fila}${seat.numero}`;
-        const selected = selectedSeats.some((item) => item.id_asiento === seat.id_asiento);
+        const selected = selectedSeats.some((s) => s.id_asiento === seat.id_asiento);
         const unavailable = seat.estado && seat.estado !== 'Disponible';
+        const c = selected
+            ? { sit: '#1D9E75', sitS: '#0F6E56', back: '#0F6E56', backS: '#085041', arms: '#085041', num: '#ffffff' }
+            : unavailable
+                ? { sit: '#c8c7c0', sitS: '#aaaaaa', back: '#b8b7b0', backS: '#999999', arms: '#b8b7b0', num: '#888888' }
+                : { sit: '#e8e7e2', sitS: '#c8c7c0', back: '#d0cfca', backS: '#b8b7b0', arms: '#c4c3bd', num: '#444441' };
+
+        const h = Math.round(seatSize * 1.11);
 
         return (
             <button
@@ -369,17 +400,45 @@ export const DetallePelicula = () => {
                 onMouseDown={(e) => e.preventDefault()}
                 onPointerDown={(e) => e.preventDefault()}
                 onClick={() => toggleSeat(seat)}
-                className={`flex h-8 w-8 items-center justify-center rounded-md border text-[0.6rem] font-bold transition-all sm:h-9 sm:w-9 sm:text-xs lg:h-10 lg:w-10 ${
-                    selected
-                        ? 'border-emerald-400 bg-emerald-400 text-slate-950 shadow-lg shadow-emerald-400/30'
-                        : unavailable
-                            ? 'cursor-not-allowed border-slate-700 bg-slate-700 text-slate-400 opacity-70'
-                        : 'border-slate-400 bg-white text-slate-900 hover:-translate-y-0.5 hover:scale-105'
-                }`}
-                title={`${seat.fila}${seat.numero} - ${seat.estado || 'Disponible'}`}
+                aria-pressed={selected}
+                aria-label={`Asiento ${seat.fila}${seat.numero}, ${seat.estado ?? 'Disponible'}`}
+                title={`${seat.fila}${seat.numero} — ${seat.estado ?? 'Disponible'}`}
+                className={[
+                    'flex flex-col items-center gap-1 bg-transparent border-none p-0',
+                    'transition-transform duration-100 focus-visible:outline focus-visible:outline-2',
+                    'focus-visible:outline-offset-2 focus-visible:outline-teal-500 focus-visible:rounded',
+                    !unavailable && 'cursor-pointer hover:-translate-y-0.5 active:scale-95',
+                    unavailable && 'cursor-not-allowed opacity-55',
+                ].filter(Boolean).join(' ')}
             >
-                {seat.fila}
-                {seat.numero}
+                {/*
+                  Vista cenital — pantalla arriba del mapa.
+                  Cojín (grande) arriba → cara a la pantalla.
+                  Respaldo (franja delgada) abajo → espalda del espectador.
+                  Apoyabrazos a los lados del cojín.
+                */}
+                <svg width={seatSize} height={h} viewBox="0 0 36 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <rect x="1" y="3" width="4" height="18" rx="2" fill={c.arms} />
+                    <rect x="31" y="3" width="4" height="18" rx="2" fill={c.arms} />
+                    <rect x="6" y="1" width="24" height="24" rx="7" fill={c.sit} stroke={c.sitS} strokeWidth="1.2" />
+                    <rect x="4" y="28" width="28" height="10" rx="4" fill={c.back} stroke={c.backS} strokeWidth="1" />
+                    <text x="18" y="17" textAnchor="middle" fontSize="10" fontWeight="700" fill={c.num} fontFamily="sans-serif">
+                        {seat.numero}
+                    </text>
+                    {selected && (
+                        <rect x="1" y="1" width="34" height="38" rx="8" fill="none" stroke="#5DCAA5" strokeWidth="2" />
+                    )}
+                    {unavailable && (
+                        <>
+                            <line x1="11" y1="6" x2="25" y2="20" stroke="white" strokeWidth="1.5" strokeLinecap="round" opacity="0.5" />
+                            <line x1="25" y1="6" x2="11" y2="20" stroke="white" strokeWidth="1.5" strokeLinecap="round" opacity="0.5" />
+                        </>
+                    )}
+                </svg>
+
+                <span className="text-[10px] font-semibold uppercase tracking-widest text-neutral-400">
+                    {seat.fila}
+                </span>
             </button>
         );
     };
@@ -415,13 +474,14 @@ export const DetallePelicula = () => {
                         </div>
                     </div>
 
-                    <div className="flex-1 min-h-0 overflow-y-auto px-3 py-3 sm:px-6 sm:py-6 lg:px-8">
-                        <div
-                            className="mx-auto w-full max-w-7xl origin-top pb-8"
-                            style={{
-                                transform: 'scale(clamp(0.72, calc((100vw - 320px) / 880), 1))',
-                            }}
-                        >
+                    <div
+                        ref={seatMapScrollRef}
+                        onScroll={(e) => {
+                            seatSizes.current.__scrollTop = e.currentTarget.scrollTop;
+                        }}
+                        className="flex-1 min-h-0 overflow-y-auto px-3 py-3 sm:px-6 sm:py-6 lg:px-8"
+                    >
+                        <div className="mx-auto w-full max-w-7xl pb-8">
                             <div className="grid gap-4 lg:grid-cols-[340px_1fr] lg:gap-6">
                             <aside className="rounded-[1.5rem] border border-slate-700/60 bg-[#061321] p-3 shadow-2xl shadow-black/30 sm:rounded-[2rem] sm:p-5">
                                 <div className="overflow-hidden rounded-[1.5rem] border-4 border-[#0e1c2c] sm:rounded-[2rem]">
@@ -528,24 +588,42 @@ export const DetallePelicula = () => {
                                                 Seleccionados: {selectedSeats.length}
                                             </span>
                                         </div>
-                                        {backendSeatRows.map(([row, seats]) => (
-                                            <div key={row} className="grid grid-cols-[24px_minmax(0,1fr)_24px] items-center gap-2 sm:grid-cols-[32px_minmax(0,1fr)_32px]">
-                                                <div className="text-center text-[0.7rem] font-black text-[#7fb0ff] sm:text-2xl">
+                                        {backendSeatRows.map(([row, seats]) => {
+                                            const viewportWidth = typeof window !== 'undefined' ? window.innerWidth : 1024;
+                                            const seatSize = Math.max(28, Math.min(56, Math.floor((viewportWidth - 140) / Math.max(seats.length, 1))));
+
+                                            return (
+                                            <div key={row} className="grid grid-cols-[1.35rem_minmax(0,1fr)_1.35rem] items-center gap-1 sm:grid-cols-[32px_minmax(0,1fr)_32px] sm:gap-2">
+                                                <div className="text-center text-[0.65rem] font-black uppercase tracking-[0.2em] text-[#7fb0ff] sm:text-2xl sm:tracking-[0.35em]">
                                                     {row}
                                                 </div>
 
-                                                <div className="flex flex-wrap justify-center gap-2 sm:gap-3">
+                                                <div
+                                                    ref={(node) => {
+                                                        if (node) {
+                                                            seatRowScrollRefs.current[row] = node;
+                                                        } else {
+                                                            delete seatRowScrollRefs.current[row];
+                                                        }
+                                                    }}
+                                                    onScroll={(e) => {
+                                                        seatSizes.current.__rowScrolls = seatSizes.current.__rowScrolls || {};
+                                                        seatSizes.current.__rowScrolls[row] = e.currentTarget.scrollLeft;
+                                                    }}
+                                                    className="flex min-w-0 flex-nowrap items-center justify-start gap-1 overflow-x-auto overflow-y-hidden px-1 pb-1 sm:justify-center sm:gap-2 sm:overflow-visible sm:px-0 sm:pb-0"
+                                                >
                                                     {seats
                                                         .slice()
                                                         .sort((a, b) => a.numero - b.numero)
-                                                        .map((seat) => renderSeat(seat))}
+                                                        .map((seat) => renderSeat(seat, seatSize))}
                                                 </div>
 
-                                                <div className="text-center text-[0.7rem] font-black text-[#7fb0ff] sm:text-2xl">
+                                                <div className="text-center text-[0.65rem] font-black uppercase tracking-[0.2em] text-[#7fb0ff] sm:text-2xl sm:tracking-[0.35em]">
                                                     {row}
                                                 </div>
                                             </div>
-                                        ))}
+                                            );
+                                        })}
                                     </div>
                                 ) : selectedShow?.id_funcion ? (
                                     <div className="rounded-2xl border border-slate-700 bg-slate-900/80 px-4 py-8 text-center text-slate-200">
@@ -837,19 +915,19 @@ export const DetallePelicula = () => {
 
                                 <div className="space-y-3">
                                     <div className="flex items-center gap-3">
-                                        <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-white bg-white text-slate-950">
+                                        <span className="inline-flex h-9 w-10 items-center justify-center rounded-2xl border border-white bg-white text-slate-950 shadow-sm">
                                             <Armchair className="h-4 w-4" />
                                         </span>
                                         <span>Disponible: lo puedes seleccionar.</span>
                                     </div>
                                     <div className="flex items-center gap-3">
-                                        <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-emerald-400 bg-emerald-400 text-slate-950">
+                                        <span className="inline-flex h-9 w-10 items-center justify-center rounded-2xl border border-emerald-400 bg-emerald-400 text-slate-950 shadow-sm">
                                             <Armchair className="h-4 w-4" />
                                         </span>
                                         <span>Seleccionado: ya lo elegiste para tu compra.</span>
                                     </div>
                                     <div className="flex items-center gap-3">
-                                        <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-700 bg-slate-700 text-slate-300">
+                                        <span className="inline-flex h-9 w-10 items-center justify-center rounded-2xl border border-slate-700 bg-slate-700 text-slate-300 shadow-sm">
                                             <Armchair className="h-4 w-4" />
                                         </span>
                                         <span>Ocupado: ya no está disponible.</span>

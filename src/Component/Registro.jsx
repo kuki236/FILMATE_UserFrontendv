@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { User, Mail, Lock, MapPin, Phone, CheckCircle } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import { registerUser } from './filmateApi';
+import { saveRegisteredSession } from './authSession';
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const FULL_NAME_REGEX = /^[A-Za-zÁÉÍÓÚÜÑáéíóúüñ\s]+$/;
@@ -143,7 +144,7 @@ export const Registro = () => {
     try {
       setLoading(true);
 
-      await registerUser({
+      const createdUser = await registerUser({
         nombres,
         apellidos,
         correo,
@@ -151,6 +152,14 @@ export const Registro = () => {
         nombreUsuario,
         telefono,
         direccion,
+      });
+
+      saveRegisteredSession({
+        ...createdUser,
+        nombres: createdUser?.nombres || nombres,
+        apellidos: createdUser?.apellidos || apellidos,
+        correo: createdUser?.correo || correo,
+        estado: createdUser?.estado || 'Activo',
       });
 
       saveRegistryEntry({
