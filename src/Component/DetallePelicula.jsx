@@ -1,9 +1,34 @@
-import React, { useState, useEffect } from 'react';
-import { ArrowLeft, ArrowRight, Armchair, Star, Play, X } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { ArrowLeft, ArrowRight, Armchair, Clock3, Clapperboard, Star, Play, X } from 'lucide-react';
 import Header from './Header.jsx';
 import Footer from './Footer.jsx';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { getCinemas, getMovieById, getSeatMap, getShowtimesByCinema } from './filmateApi';
+
+const FALLBACK_MEDIA_IMAGE =
+    "data:image/svg+xml;charset=UTF-8," +
+    encodeURIComponent(`
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 1200">
+            <defs>
+                <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+                    <stop offset="0%" stop-color="#0f172a" />
+                    <stop offset="50%" stop-color="#1e293b" />
+                    <stop offset="100%" stop-color="#111827" />
+                </linearGradient>
+            </defs>
+            <rect width="800" height="1200" fill="url(#g)" />
+            <rect x="70" y="80" width="660" height="1040" rx="36" fill="none" stroke="#475569" stroke-width="6" stroke-dasharray="18 16" />
+            <circle cx="400" cy="430" r="120" fill="#e11d48" opacity="0.18" />
+            <path d="M305 450l70-70 60 60 55-55 105 105v95H305z" fill="#cbd5e1" opacity="0.75" />
+            <path d="M280 790h240c48 0 86-38 86-86v-36l-132-132-65 65-95-95-134 134v64c0 28 22 50 50 50z" fill="#cbd5e1" opacity="0.45" />
+            <text x="400" y="1000" text-anchor="middle" fill="#e2e8f0" font-family="Arial, Helvetica, sans-serif" font-size="40" font-weight="700">Imagen no disponible</text>
+        </svg>
+    `);
+
+const handleImageFallback = (event) => {
+    event.currentTarget.onerror = null;
+    event.currentTarget.src = FALLBACK_MEDIA_IMAGE;
+};
 
 export const DetallePelicula = () => {
     const { movieId } = useParams();
@@ -23,6 +48,9 @@ export const DetallePelicula = () => {
     const [movieError, setMovieError] = useState('');
     const location = useLocation();
     const navigate = useNavigate();
+    const seatMapScrollRef = useRef(null);
+    const seatRowScrollRefs = useRef({});
+    const seatSizes = useRef({});
 
     const pelicula = movieDetails || location.state;
 
@@ -89,7 +117,7 @@ export const DetallePelicula = () => {
                         try {
                             const response = await getShowtimesByCinema(cinema.id);
                             const funciones = Array.isArray(response?.funciones)
-                                ? response.funciones.filter((funcion) => funcion.id_pelicula === pelicula.id)
+                                ? response.funciones.filter((funcion) => Number(funcion.id_pelicula) === Number(pelicula.id))
                                 : [];
 
                             return {
@@ -126,6 +154,27 @@ export const DetallePelicula = () => {
             isMounted = false;
         };
     }, [pelicula?.id]);
+
+    useEffect(() => {
+        if (!selectedShow) return;
+
+        const restoreScroll = () => {
+            const container = seatMapScrollRef.current;
+            if (!container) return;
+
+            const currentTop = seatSizes.current.__scrollTop ?? container.scrollTop;
+            container.scrollTop = currentTop;
+
+            const rowScrolls = seatSizes.current.__rowScrolls || {};
+            Object.entries(seatRowScrollRefs.current).forEach(([row, node]) => {
+                if (!node) return;
+                node.scrollLeft = rowScrolls[row] ?? node.scrollLeft;
+            });
+        };
+
+        const raf = window.requestAnimationFrame(restoreScroll);
+        return () => window.cancelAnimationFrame(raf);
+    }, [selectedSeats, selectedShow]);
 
     if (movieLoading && !movieDetails && !location.state) {
         return (
@@ -165,12 +214,6 @@ export const DetallePelicula = () => {
             </div>
         );
     }
-
-    const sedes = [
-        { id: 1, nombre: "Sede Lima Centro", horarios: ["11:30", "13:45", "16:00", "19:30"] },
-        { id: 2, nombre: "Sede La Molina", horarios: ["13:00", "18:45", "20:00"] },
-        { id: 3, nombre: "Sede Mall del Sur", horarios: ["20:30", "23:00"] }
-    ];
 
     const resenas = [
         {
@@ -235,15 +278,15 @@ export const DetallePelicula = () => {
         </div>
     );
 
-    const poster = pelicula.imagenPoster || pelicula.imagen;
-    const trailerImg = pelicula.imagenTrailer || pelicula.imagenPoster || pelicula.imagen;
+    const poster = pelicula.imagenPoster || pelicula.imagen || FALLBACK_MEDIA_IMAGE;
+    const trailerImg = pelicula.imagenTrailer || pelicula.imagenPoster || pelicula.imagen || FALLBACK_MEDIA_IMAGE;
     const titulo = pelicula.titulo || 'Película';
     const generos = Array.isArray(pelicula.generos) && pelicula.generos.length
         ? pelicula.generos
         : pelicula.genero
             ? String(pelicula.genero).split(',').map((item) => item.trim()).filter(Boolean)
             : [];
-    const genero = generos.length ? generos.join(', ') : 'GÃ©nero no disponible';
+    const genero = generos.length ? generos.join(', ') : 'Género no disponible';
     const duracion = pelicula.duracion || '';
     const clasificacion = pelicula.clasificacion || '';
     const rating = pelicula.rating || 0;
@@ -337,10 +380,17 @@ export const DetallePelicula = () => {
     }, {});
     const backendSeatRows = Object.entries(seatMapByRow).sort(([a], [b]) => a.localeCompare(b, 'es', { numeric: true }));
 
-    const renderSeat = (seat) => {
+    const renderSeat = (seat, seatSize = 36) => {
         const seatKey = seat.id_asiento ?? `${seat.fila}${seat.numero}`;
-        const selected = selectedSeats.some((item) => item.id_asiento === seat.id_asiento);
+        const selected = selectedSeats.some((s) => s.id_asiento === seat.id_asiento);
         const unavailable = seat.estado && seat.estado !== 'Disponible';
+        const c = selected
+            ? { sit: '#1D9E75', sitS: '#0F6E56', back: '#0F6E56', backS: '#085041', arms: '#085041', num: '#ffffff' }
+            : unavailable
+                ? { sit: '#c8c7c0', sitS: '#aaaaaa', back: '#b8b7b0', backS: '#999999', arms: '#b8b7b0', num: '#888888' }
+                : { sit: '#e8e7e2', sitS: '#c8c7c0', back: '#d0cfca', backS: '#b8b7b0', arms: '#c4c3bd', num: '#444441' };
+
+        const h = Math.round(seatSize * 1.11);
 
         return (
             <button
@@ -350,17 +400,45 @@ export const DetallePelicula = () => {
                 onMouseDown={(e) => e.preventDefault()}
                 onPointerDown={(e) => e.preventDefault()}
                 onClick={() => toggleSeat(seat)}
-                className={`flex h-8 w-8 items-center justify-center rounded-md border text-[0.6rem] font-bold transition-all sm:h-9 sm:w-9 sm:text-xs lg:h-10 lg:w-10 ${
-                    selected
-                        ? 'border-emerald-400 bg-emerald-400 text-slate-950 shadow-lg shadow-emerald-400/30'
-                        : unavailable
-                            ? 'cursor-not-allowed border-slate-700 bg-slate-700 text-slate-400 opacity-70'
-                        : 'border-slate-400 bg-white text-slate-900 hover:-translate-y-0.5 hover:scale-105'
-                }`}
-                title={`${seat.fila}${seat.numero} - ${seat.estado || 'Disponible'}`}
+                aria-pressed={selected}
+                aria-label={`Asiento ${seat.fila}${seat.numero}, ${seat.estado ?? 'Disponible'}`}
+                title={`${seat.fila}${seat.numero} — ${seat.estado ?? 'Disponible'}`}
+                className={[
+                    'flex flex-col items-center gap-1 bg-transparent border-none p-0',
+                    'transition-transform duration-100 focus-visible:outline focus-visible:outline-2',
+                    'focus-visible:outline-offset-2 focus-visible:outline-teal-500 focus-visible:rounded',
+                    !unavailable && 'cursor-pointer hover:-translate-y-0.5 active:scale-95',
+                    unavailable && 'cursor-not-allowed opacity-55',
+                ].filter(Boolean).join(' ')}
             >
-                {seat.fila}
-                {seat.numero}
+                {/*
+                  Vista cenital — pantalla arriba del mapa.
+                  Cojín (grande) arriba → cara a la pantalla.
+                  Respaldo (franja delgada) abajo → espalda del espectador.
+                  Apoyabrazos a los lados del cojín.
+                */}
+                <svg width={seatSize} height={h} viewBox="0 0 36 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <rect x="1" y="3" width="4" height="18" rx="2" fill={c.arms} />
+                    <rect x="31" y="3" width="4" height="18" rx="2" fill={c.arms} />
+                    <rect x="6" y="1" width="24" height="24" rx="7" fill={c.sit} stroke={c.sitS} strokeWidth="1.2" />
+                    <rect x="4" y="28" width="28" height="10" rx="4" fill={c.back} stroke={c.backS} strokeWidth="1" />
+                    <text x="18" y="17" textAnchor="middle" fontSize="10" fontWeight="700" fill={c.num} fontFamily="sans-serif">
+                        {seat.numero}
+                    </text>
+                    {selected && (
+                        <rect x="1" y="1" width="34" height="38" rx="8" fill="none" stroke="#5DCAA5" strokeWidth="2" />
+                    )}
+                    {unavailable && (
+                        <>
+                            <line x1="11" y1="6" x2="25" y2="20" stroke="white" strokeWidth="1.5" strokeLinecap="round" opacity="0.5" />
+                            <line x1="25" y1="6" x2="11" y2="20" stroke="white" strokeWidth="1.5" strokeLinecap="round" opacity="0.5" />
+                        </>
+                    )}
+                </svg>
+
+                <span className="text-[10px] font-semibold uppercase tracking-widest text-neutral-400">
+                    {seat.fila}
+                </span>
             </button>
         );
     };
@@ -396,13 +474,14 @@ export const DetallePelicula = () => {
                         </div>
                     </div>
 
-                    <div className="flex-1 min-h-0 overflow-y-auto px-3 py-3 sm:px-6 sm:py-6 lg:px-8">
-                        <div
-                            className="mx-auto w-full max-w-7xl origin-top pb-8"
-                            style={{
-                                transform: 'scale(clamp(0.72, calc((100vw - 320px) / 880), 1))',
-                            }}
-                        >
+                    <div
+                        ref={seatMapScrollRef}
+                        onScroll={(e) => {
+                            seatSizes.current.__scrollTop = e.currentTarget.scrollTop;
+                        }}
+                        className="flex-1 min-h-0 overflow-y-auto px-3 py-3 sm:px-6 sm:py-6 lg:px-8"
+                    >
+                        <div className="mx-auto w-full max-w-7xl pb-8">
                             <div className="grid gap-4 lg:grid-cols-[340px_1fr] lg:gap-6">
                             <aside className="rounded-[1.5rem] border border-slate-700/60 bg-[#061321] p-3 shadow-2xl shadow-black/30 sm:rounded-[2rem] sm:p-5">
                                 <div className="overflow-hidden rounded-[1.5rem] border-4 border-[#0e1c2c] sm:rounded-[2rem]">
@@ -434,7 +513,7 @@ export const DetallePelicula = () => {
                                     </div>
 
                                     <div className="flex items-center gap-3 text-[#5fa6ff]">
-                                        <span className="text-2xl sm:text-3xl">🕒</span>
+                                        <Clock3 className="h-6 w-6 sm:h-8 sm:w-8" />
                                         <p className="text-lg font-bold sm:text-2xl">
                                             {selectedShow.fecha_hora_inicio
                                                 ? new Date(selectedShow.fecha_hora_inicio).toLocaleTimeString('es-PE', {
@@ -446,7 +525,7 @@ export const DetallePelicula = () => {
                                     </div>
 
                                     <div className="flex items-center gap-3 text-[#5fa6ff]">
-                                        <span className="text-2xl sm:text-3xl">🎬</span>
+                                        <Clapperboard className="h-6 w-6 sm:h-8 sm:w-8" />
                                         <p className="text-lg font-bold sm:text-2xl">{selectedShow.nombre_sala || selectedShow.sala || 'Sala por definir'}</p>
                                     </div>
                                 </div>
@@ -509,24 +588,42 @@ export const DetallePelicula = () => {
                                                 Seleccionados: {selectedSeats.length}
                                             </span>
                                         </div>
-                                        {backendSeatRows.map(([row, seats]) => (
-                                            <div key={row} className="grid grid-cols-[24px_minmax(0,1fr)_24px] items-center gap-2 sm:grid-cols-[32px_minmax(0,1fr)_32px]">
-                                                <div className="text-center text-[0.7rem] font-black text-[#7fb0ff] sm:text-2xl">
+                                        {backendSeatRows.map(([row, seats]) => {
+                                            const viewportWidth = typeof window !== 'undefined' ? window.innerWidth : 1024;
+                                            const seatSize = Math.max(28, Math.min(56, Math.floor((viewportWidth - 140) / Math.max(seats.length, 1))));
+
+                                            return (
+                                            <div key={row} className="grid grid-cols-[1.35rem_minmax(0,1fr)_1.35rem] items-center gap-1 sm:grid-cols-[32px_minmax(0,1fr)_32px] sm:gap-2">
+                                                <div className="text-center text-[0.65rem] font-black uppercase tracking-[0.2em] text-[#7fb0ff] sm:text-2xl sm:tracking-[0.35em]">
                                                     {row}
                                                 </div>
 
-                                                <div className="flex flex-wrap justify-center gap-2 sm:gap-3">
+                                                <div
+                                                    ref={(node) => {
+                                                        if (node) {
+                                                            seatRowScrollRefs.current[row] = node;
+                                                        } else {
+                                                            delete seatRowScrollRefs.current[row];
+                                                        }
+                                                    }}
+                                                    onScroll={(e) => {
+                                                        seatSizes.current.__rowScrolls = seatSizes.current.__rowScrolls || {};
+                                                        seatSizes.current.__rowScrolls[row] = e.currentTarget.scrollLeft;
+                                                    }}
+                                                    className="flex min-w-0 flex-nowrap items-center justify-start gap-1 overflow-x-auto overflow-y-hidden px-1 pb-1 sm:justify-center sm:gap-2 sm:overflow-visible sm:px-0 sm:pb-0"
+                                                >
                                                     {seats
                                                         .slice()
                                                         .sort((a, b) => a.numero - b.numero)
-                                                        .map((seat) => renderSeat(seat))}
+                                                        .map((seat) => renderSeat(seat, seatSize))}
                                                 </div>
 
-                                                <div className="text-center text-[0.7rem] font-black text-[#7fb0ff] sm:text-2xl">
+                                                <div className="text-center text-[0.65rem] font-black uppercase tracking-[0.2em] text-[#7fb0ff] sm:text-2xl sm:tracking-[0.35em]">
                                                     {row}
                                                 </div>
                                             </div>
-                                        ))}
+                                            );
+                                        })}
                                     </div>
                                 ) : selectedShow?.id_funcion ? (
                                     <div className="rounded-2xl border border-slate-700 bg-slate-900/80 px-4 py-8 text-center text-slate-200">
@@ -573,7 +670,7 @@ export const DetallePelicula = () => {
                     {/* Columna Izquierda */}
                     <div className="lg:col-span-1 space-y-6 order-1">
                         <div className="bg-slate-800/30 backdrop-blur-sm rounded-3xl overflow-hidden border border-slate-700/50">
-                            <img src={poster} alt={titulo} className="w-full h-[600px] object-cover" />
+                            <img src={poster} alt={titulo} className="w-full h-[600px] object-cover" onError={handleImageFallback} />
                             <div className="p-6 text-center">
                                 <h2 className="text-2xl font-bold text-white mb-2">{titulo}</h2>
                                 <p className="text-gray-300 mb-4">
@@ -625,7 +722,7 @@ export const DetallePelicula = () => {
                         {/* Trailer desktop */}
                         <div className="bg-slate-800/30 backdrop-blur-sm rounded-3xl overflow-hidden border border-slate-700/50 hidden lg:block">
                             <div className="relative group cursor-pointer" onClick={() => videoId && setShowTrailer(true)}>
-                                <img src={trailerPreview} alt="Vista previa del tráiler" className="w-full h-[400px] object-cover" />
+                                <img src={trailerPreview} alt="Vista previa del tráiler" className="w-full h-[400px] object-cover" onError={handleImageFallback} />
                                 <div className="absolute inset-0 bg-black/40 flex items-center justify-center">
                                     <div className="text-center">
                                         <div className="w-20 h-20 rounded-full border-4 border-white flex items-center justify-center mb-4 mx-auto group-hover:scale-110 transition-transform">
@@ -677,29 +774,16 @@ export const DetallePelicula = () => {
                                     </div>
                                 ))
                             ) : (
-                                sedes.map((sede) => (
-                                    <div key={sede.id} className="bg-gradient-to-r from-slate-700/30 to-slate-800/30 backdrop-blur-sm rounded-3xl p-6 border border-slate-700/50">
-                                        <h3 className="text-white text-xl font-bold mb-4">{sede.nombre}</h3>
-                                        <div className="flex flex-wrap gap-3">
-                                            {sede.horarios.map((horario, index) => (
-                                                <button
-                                                    key={index}
-                                                    onClick={() => openSeatSelector({ id: sede.id, nombre_cine: sede.nombre }, { horario, nombre_sala: `SALA ${9 + sede.id}` })}
-                                                    className="px-6 py-2 bg-red-500 hover:bg-red-600 text-white font-bold rounded-full transition-all duration-300 shadow-lg hover:scale-105"
-                                                >
-                                                    {horario}
-                                                </button>
-                                            ))}
-                                        </div>
-                                    </div>
-                                ))
+                                <div className="rounded-3xl border border-slate-700/50 bg-slate-800/30 p-6 text-slate-200">
+                                    No hay funciones disponibles para esta película por el momento.
+                                </div>
                             )}
                         </div>
 
                         {/* Trailer móvil */}
                         <div className="bg-slate-800/30 backdrop-blur-sm rounded-3xl overflow-hidden border border-slate-700/50 lg:hidden">
                             <div className="relative group cursor-pointer" onClick={() => videoId && setShowTrailer(true)}>
-                                <img src={trailerPreview} alt="Vista previa del tráiler" className="w-full h-[400px] object-cover" />
+                                <img src={trailerPreview} alt="Vista previa del tráiler" className="w-full h-[400px] object-cover" onError={handleImageFallback} />
                                 <div className="absolute inset-0 bg-black/40 flex items-center justify-center">
                                     <div className="text-center">
                                         <div className="w-20 h-20 rounded-full border-4 border-white flex items-center justify-center mb-4 mx-auto group-hover:scale-110 transition-transform">
@@ -788,6 +872,16 @@ export const DetallePelicula = () => {
                                 allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
                                 allowFullScreen
                             ></iframe>
+                            {trailerUrl && (
+                                <a
+                                    href={trailerUrl}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="absolute bottom-4 left-4 rounded-full bg-black/60 px-4 py-2 text-sm font-semibold text-white backdrop-blur-sm transition-colors hover:bg-black/80"
+                                >
+                                    Abrir en YouTube
+                                </a>
+                            )}
                         </div>
                     </div>
                 )}
@@ -821,19 +915,19 @@ export const DetallePelicula = () => {
 
                                 <div className="space-y-3">
                                     <div className="flex items-center gap-3">
-                                        <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-white bg-white text-slate-950">
+                                        <span className="inline-flex h-9 w-10 items-center justify-center rounded-2xl border border-white bg-white text-slate-950 shadow-sm">
                                             <Armchair className="h-4 w-4" />
                                         </span>
                                         <span>Disponible: lo puedes seleccionar.</span>
                                     </div>
                                     <div className="flex items-center gap-3">
-                                        <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-emerald-400 bg-emerald-400 text-slate-950">
+                                        <span className="inline-flex h-9 w-10 items-center justify-center rounded-2xl border border-emerald-400 bg-emerald-400 text-slate-950 shadow-sm">
                                             <Armchair className="h-4 w-4" />
                                         </span>
                                         <span>Seleccionado: ya lo elegiste para tu compra.</span>
                                     </div>
                                     <div className="flex items-center gap-3">
-                                        <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-700 bg-slate-700 text-slate-300">
+                                        <span className="inline-flex h-9 w-10 items-center justify-center rounded-2xl border border-slate-700 bg-slate-700 text-slate-300 shadow-sm">
                                             <Armchair className="h-4 w-4" />
                                         </span>
                                         <span>Ocupado: ya no está disponible.</span>

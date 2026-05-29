@@ -142,9 +142,50 @@ export async function getCinemaById(cinemaId) {
   return normalizeCinema(data);
 }
 
+const extractShowtimeList = (data) => {
+  const candidates = [
+    data,
+    data?.funciones,
+    data?.data,
+    data?.results,
+    data?.showtimes,
+    data?.items,
+    data?.payload,
+    data?.data?.funciones,
+    data?.data?.data,
+    data?.data?.results,
+    data?.data?.showtimes,
+    data?.data?.items,
+  ];
+
+  for (const candidate of candidates) {
+    if (Array.isArray(candidate)) {
+      return candidate;
+    }
+  }
+
+  return [];
+};
+
 export async function getShowtimesByCinema(cinemaId) {
   const data = await request(`/showtimes/cinema/${cinemaId}`);
-  return data;
+  const funciones = extractShowtimeList(data);
+
+  if (import.meta.env.DEV) {
+    console.groupCollapsed(`[filmateApi] showtimes/cinema/${cinemaId}`);
+    console.log('raw response:', data);
+    console.log('normalized funciones:', funciones);
+    console.groupEnd();
+  }
+
+  if (data && typeof data === 'object' && !Array.isArray(data)) {
+    return {
+      ...data,
+      funciones,
+    };
+  }
+
+  return { funciones };
 }
 
 export async function getSeatMap(showtimeId) {
