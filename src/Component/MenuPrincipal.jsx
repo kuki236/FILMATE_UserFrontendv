@@ -3,7 +3,6 @@ import { Filter, Star, X } from 'lucide-react';
 import Header from './Header.jsx';
 import Footer from './Footer.jsx';
 import { useNavigate } from 'react-router-dom';
-import { peliculas } from './peliculas';
 import { getCinemas, getMovies, getShowtimesByDate } from './filmateApi';
 
 const FALLBACK_MEDIA_IMAGE =
@@ -30,7 +29,7 @@ const handleImageFallback = (event) => {
 
 export const MenuPrincipal = () => {
     const navigate = useNavigate();
-    const [peliculasData, setPeliculasData] = useState(peliculas);
+    const [peliculasData, setPeliculasData] = useState([]);
     const [cinemasData, setCinemasData] = useState([]);
     const [showtimeCatalog, setShowtimeCatalog] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -115,14 +114,14 @@ export const MenuPrincipal = () => {
                     setPeliculasData(movies);
                     setError('');
                 } else {
-                    setPeliculasData(peliculas);
-                    setError('La API no devolvió películas, se muestran datos locales.');
+                    setPeliculasData([]);
+                    setError('La API no devolvió películas.');
                 }
             } catch (err) {
                 if (!isMounted) return;
 
-                setPeliculasData(peliculas);
-                setError('No se pudo conectar con el backend, se muestran datos locales.');
+                setPeliculasData([]);
+                setError('No se pudo conectar con el backend.');
                 console.error('Error cargando películas:', err);
             } finally {
                 if (isMounted) {
@@ -165,7 +164,22 @@ export const MenuPrincipal = () => {
 
                                 try {
                                     const response = await getShowtimesByDate(dateKey, { cinemaId: cinema.id });
-                                    return [day, Array.isArray(response) ? response : []];
+                                    const funcionesOrdenadas = Array.isArray(response)
+                                        ? response
+                                            .slice()
+                                            .sort((a, b) => {
+                                                const timeA = new Date(a.fecha_hora_inicio).getTime();
+                                                const timeB = new Date(b.fecha_hora_inicio).getTime();
+
+                                                if (!Number.isNaN(timeA) && !Number.isNaN(timeB) && timeA !== timeB) {
+                                                    return timeA - timeB;
+                                                }
+
+                                                return (Number(a.id_funcion) || 0) - (Number(b.id_funcion) || 0);
+                                            })
+                                        : [];
+
+                                    return [day, funcionesOrdenadas];
                                 } catch (err) {
                                     if (import.meta.env.DEV) {
                                         console.warn(
@@ -242,13 +256,13 @@ export const MenuPrincipal = () => {
     }, [peliculasData]);
 
     const allPeliculasSorted = useMemo(() => {
-        return (peliculasData.length > 0 ? peliculasData : peliculas)
+        return peliculasData
             .slice()
             .sort((a, b) => (b.estreno ? 1 : 0) - (a.estreno ? 1 : 0));
     }, [peliculasData]);
 
     const filteredPeliculas = useMemo(() => {
-        const source = peliculasData.length > 0 ? peliculasData : peliculas;
+        const source = peliculasData;
         const selectedDayKeys =
             selectedDay === 'all'
                 ? ['hoy', 'manana', 'pasado']
@@ -478,5 +492,3 @@ export const MenuPrincipal = () => {
 };
 
 export default MenuPrincipal;
-
-

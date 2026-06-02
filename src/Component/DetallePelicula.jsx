@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { ArrowLeft, ArrowRight, Armchair, Clock3, Clapperboard, Star, Play, X } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, ArrowRight, Armchair, Clock3, Clapperboard, Star, Play, X } from 'lucide-react';
 import Header from './Header.jsx';
 import Footer from './Footer.jsx';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
@@ -43,6 +43,7 @@ export const DetallePelicula = () => {
     const [seatMapLoading, setSeatMapLoading] = useState(false);
     const [seatMapError, setSeatMapError] = useState('');
     const [showSeatHelp, setShowSeatHelp] = useState(false);
+    const [showSeatConfirm, setShowSeatConfirm] = useState(false);
     const [movieDetails, setMovieDetails] = useState(null);
     const [movieLoading, setMovieLoading] = useState(Boolean(movieId));
     const [movieError, setMovieError] = useState('');
@@ -51,8 +52,13 @@ export const DetallePelicula = () => {
     const seatMapScrollRef = useRef(null);
     const seatRowScrollRefs = useRef({});
     const seatSizes = useRef({});
+    const loadedSeatMapFunctionIdRef = useRef(null);
 
-    const pelicula = movieDetails || location.state;
+    const pelicula = movieDetails || location.state?.movieState || location.state;
+    const returnSeatSelection =
+        location.state?.returnToSeatSelection ||
+        (location.state?.selectedShow ? location.state : null);
+    const seatPrice = 22.5;
 
     useEffect(() => {
         window.scrollTo(0, 0);
@@ -154,6 +160,53 @@ export const DetallePelicula = () => {
             isMounted = false;
         };
     }, [pelicula?.id]);
+
+    useEffect(() => {
+        if (!returnSeatSelection) return;
+
+        if (returnSeatSelection.selectedShow) {
+            setSelectedShow(returnSeatSelection.selectedShow);
+        }
+
+        if (Array.isArray(returnSeatSelection.selectedSeats)) {
+            setSelectedSeats(returnSeatSelection.selectedSeats);
+        }
+    }, [returnSeatSelection]);
+
+    useEffect(() => {
+        const functionId = selectedShow?.id_funcion;
+        if (!functionId || loadedSeatMapFunctionIdRef.current === functionId) return;
+
+        let isMounted = true;
+
+        const loadSeatMap = async () => {
+            try {
+                setSeatMapLoading(true);
+                setSeatMapError('');
+
+                const response = await getSeatMap(functionId);
+                if (!isMounted) return;
+
+                setSeatMap(Array.isArray(response?.asientos) ? response.asientos : []);
+                loadedSeatMapFunctionIdRef.current = functionId;
+            } catch (err) {
+                if (!isMounted) return;
+                console.error('Error cargando mapa de asientos:', err);
+                setSeatMapError('No se pudo cargar el mapa de asientos real.');
+                setSeatMap([]);
+            } finally {
+                if (isMounted) {
+                    setSeatMapLoading(false);
+                }
+            }
+        };
+
+        loadSeatMap();
+
+        return () => {
+            isMounted = false;
+        };
+    }, [selectedShow?.id_funcion]);
 
     useEffect(() => {
         if (!selectedShow) return;
@@ -278,6 +331,45 @@ export const DetallePelicula = () => {
         </div>
     );
 
+    const SeatGlyph = ({
+        seatSize = 36,
+        seatNumber = '',
+        selected = false,
+        unavailable = false,
+        showNumber = true,
+    }) => {
+        const c = selected
+            ? { sit: '#1D9E75', sitS: '#0F6E56', back: '#0F6E56', backS: '#085041', arms: '#085041', num: '#ffffff' }
+            : unavailable
+                ? { sit: '#ef4444', sitS: '#b91c1c', back: '#dc2626', backS: '#991b1b', arms: '#dc2626', num: '#ffffff' }
+                : { sit: '#e8e7e2', sitS: '#c8c7c0', back: '#d0cfca', backS: '#b8b7b0', arms: '#c4c3bd', num: '#444441' };
+
+        const h = Math.round(seatSize * 1.11);
+
+        return (
+            <svg width={seatSize} height={h} viewBox="0 0 36 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <rect x="1" y="3" width="4" height="18" rx="2" fill={c.arms} />
+                <rect x="31" y="3" width="4" height="18" rx="2" fill={c.arms} />
+                <rect x="6" y="1" width="24" height="24" rx="7" fill={c.sit} stroke={c.sitS} strokeWidth="1.2" />
+                <rect x="4" y="28" width="28" height="10" rx="4" fill={c.back} stroke={c.backS} strokeWidth="1" />
+                {showNumber && (
+                    <text x="18" y="17" textAnchor="middle" fontSize="10" fontWeight="700" fill={c.num} fontFamily="sans-serif">
+                        {seatNumber}
+                    </text>
+                )}
+                {selected && (
+                    <rect x="1" y="1" width="34" height="38" rx="8" fill="none" stroke="#5DCAA5" strokeWidth="2" />
+                )}
+                {unavailable && (
+                    <>
+                        <line x1="11" y1="6" x2="25" y2="20" stroke="white" strokeWidth="1.5" strokeLinecap="round" opacity="0.5" />
+                        <line x1="25" y1="6" x2="11" y2="20" stroke="white" strokeWidth="1.5" strokeLinecap="round" opacity="0.5" />
+                    </>
+                )}
+            </svg>
+        );
+    };
+
     const poster = pelicula.imagenPoster || pelicula.imagen || FALLBACK_MEDIA_IMAGE;
     const trailerImg = pelicula.imagenTrailer || pelicula.imagenPoster || pelicula.imagen || FALLBACK_MEDIA_IMAGE;
     const titulo = pelicula.titulo || 'Película';
@@ -291,7 +383,12 @@ export const DetallePelicula = () => {
     const clasificacion = pelicula.clasificacion || '';
     const rating = pelicula.rating || 0;
     const sinopsis = pelicula.sinopsis || 'Sinopsis próxima a actualizar.';
-    const director = pelicula.director || 'Por definir';
+    const directores = Array.isArray(pelicula.directores) && pelicula.directores.length
+        ? pelicula.directores
+        : pelicula.director
+            ? String(pelicula.director).split(',').map((item) => item.trim()).filter(Boolean)
+            : [];
+    const director = directores.length ? directores.join(', ') : 'Por definir';
     const actores = Array.isArray(pelicula.actores) && pelicula.actores.length
         ? pelicula.actores
         : pelicula.reparto
@@ -303,6 +400,7 @@ export const DetallePelicula = () => {
 
     const generoChips = generos.length ? generos : ['Género no disponible'];
     const repartoLista = actores.length ? actores : ['Por definir'];
+    const chipStyle = "rounded-full border border-slate-600 bg-slate-900/80 px-3 py-1 text-sm text-gray-200";
 
     const getYouTubeVideoId = (url) => {
         if (!url) return null;
@@ -316,6 +414,27 @@ export const DetallePelicula = () => {
         ? `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`
         : trailerImg;
 
+    const getShowtimeSortValue = (showtime) => {
+        const rawValue = String(
+            showtime?.fecha_hora_inicio ??
+            showtime?.fecha_inicio ??
+            showtime?.horario ??
+            ''
+        ).trim();
+
+        const timeMatch = rawValue.match(/(\d{1,2}):(\d{2})/);
+        if (timeMatch) {
+            return (Number(timeMatch[1]) * 60) + Number(timeMatch[2]);
+        }
+
+        const parsedDate = new Date(rawValue);
+        if (!Number.isNaN(parsedDate.getTime())) {
+            return (parsedDate.getHours() * 60) + parsedDate.getMinutes();
+        }
+
+        return Number(showtime?.id_funcion) || 0;
+    };
+
     const openSeatSelector = async (cinema, showtime) => {
         setSelectedShow({
             cinema,
@@ -324,6 +443,7 @@ export const DetallePelicula = () => {
         setSelectedSeats([]);
         setSeatMap([]);
         setSeatMapError('');
+        loadedSeatMapFunctionIdRef.current = null;
 
         if (!showtime?.id_funcion) {
             return;
@@ -355,6 +475,7 @@ export const DetallePelicula = () => {
     const goToDulceria = () => {
         navigate('/dulceria', {
             state: {
+                movieId: pelicula?.id ?? movieId,
                 pelicula: titulo,
                 poster,
                 sede: selectedShow?.cinema?.nombre_cine || selectedShow?.cinema?.nombre || selectedShow?.sede?.nombre,
@@ -366,9 +487,18 @@ export const DetallePelicula = () => {
                 asientos: selectedSeats.map((seat) => `${seat.fila}${seat.numero}`),
                 seatIds: selectedSeats.map((seat) => seat.id_asiento),
                 asientosSeleccionados: selectedSeats,
+                returnToSeatSelection: {
+                    movieId: pelicula?.id ?? movieId,
+                    movieState: pelicula,
+                    selectedShow,
+                    selectedSeats,
+                },
             },
         });
     };
+
+    const selectedSeatLabels = selectedSeats.map((seat) => `${seat.fila}${seat.numero}`);
+    const selectedSeatsTotal = selectedSeats.length * seatPrice;
 
     const seatMapByRow = seatMap.reduce((acc, seat) => {
         if (!acc[seat.fila]) {
@@ -384,13 +514,6 @@ export const DetallePelicula = () => {
         const seatKey = seat.id_asiento ?? `${seat.fila}${seat.numero}`;
         const selected = selectedSeats.some((s) => s.id_asiento === seat.id_asiento);
         const unavailable = seat.estado && seat.estado !== 'Disponible';
-        const c = selected
-            ? { sit: '#1D9E75', sitS: '#0F6E56', back: '#0F6E56', backS: '#085041', arms: '#085041', num: '#ffffff' }
-            : unavailable
-                ? { sit: '#c8c7c0', sitS: '#aaaaaa', back: '#b8b7b0', backS: '#999999', arms: '#b8b7b0', num: '#888888' }
-                : { sit: '#e8e7e2', sitS: '#c8c7c0', back: '#d0cfca', backS: '#b8b7b0', arms: '#c4c3bd', num: '#444441' };
-
-        const h = Math.round(seatSize * 1.11);
 
         return (
             <button
@@ -417,29 +540,73 @@ export const DetallePelicula = () => {
                   Respaldo (franja delgada) abajo → espalda del espectador.
                   Apoyabrazos a los lados del cojín.
                 */}
-                <svg width={seatSize} height={h} viewBox="0 0 36 40" fill="none" xmlns="http://www.w3.org/2000/svg">
-                    <rect x="1" y="3" width="4" height="18" rx="2" fill={c.arms} />
-                    <rect x="31" y="3" width="4" height="18" rx="2" fill={c.arms} />
-                    <rect x="6" y="1" width="24" height="24" rx="7" fill={c.sit} stroke={c.sitS} strokeWidth="1.2" />
-                    <rect x="4" y="28" width="28" height="10" rx="4" fill={c.back} stroke={c.backS} strokeWidth="1" />
-                    <text x="18" y="17" textAnchor="middle" fontSize="10" fontWeight="700" fill={c.num} fontFamily="sans-serif">
-                        {seat.numero}
-                    </text>
-                    {selected && (
-                        <rect x="1" y="1" width="34" height="38" rx="8" fill="none" stroke="#5DCAA5" strokeWidth="2" />
-                    )}
-                    {unavailable && (
-                        <>
-                            <line x1="11" y1="6" x2="25" y2="20" stroke="white" strokeWidth="1.5" strokeLinecap="round" opacity="0.5" />
-                            <line x1="25" y1="6" x2="11" y2="20" stroke="white" strokeWidth="1.5" strokeLinecap="round" opacity="0.5" />
-                        </>
-                    )}
-                </svg>
+                <SeatGlyph seatSize={seatSize} seatNumber={seat.numero} selected={selected} unavailable={unavailable} />
 
                 <span className="text-[10px] font-semibold uppercase tracking-widest text-neutral-400">
                     {seat.fila}
                 </span>
             </button>
+        );
+    };
+
+    const SeatConfirmationModal = () => {
+        if (!showSeatConfirm) return null;
+
+        return (
+            <div className="fixed inset-0 z-[70] flex items-end justify-center bg-black/75 p-3 sm:items-center sm:p-4">
+                <div className="w-full max-w-[95vw] overflow-hidden rounded-3xl border border-slate-700 bg-slate-900 shadow-2xl sm:max-w-md">
+                    <div className="flex items-center gap-4 border-b border-slate-700 px-4 py-4 sm:px-6">
+                        <div className="flex h-12 w-12 items-center justify-center rounded-full bg-amber-500/15 text-amber-300">
+                            <AlertTriangle className="h-6 w-6" />
+                        </div>
+                        <div>
+                            <h2 className="text-lg font-bold text-white sm:text-xl">Confirmar asientos</h2>
+                            <p className="text-sm text-slate-400">Revisa tus asientos y el total antes de continuar.</p>
+                        </div>
+                    </div>
+
+                    <div className="px-4 py-5 sm:px-6">
+                        <p className="text-sm text-slate-300">
+                            ¿Estás seguro de continuar con estos asientos?
+                        </p>
+
+                        <div className="mt-4 rounded-2xl border border-slate-700 bg-slate-800 p-4">
+                            <div className="flex items-center justify-between gap-4 text-sm text-slate-300">
+                                <span>Asientos</span>
+                                <span className="font-semibold text-white text-right">
+                                    {selectedSeatLabels.length ? selectedSeatLabels.join(', ') : 'Sin asientos'}
+                                </span>
+                            </div>
+                            <div className="mt-3 flex items-center justify-between text-sm text-slate-300">
+                                <span>Cantidad</span>
+                                <span className="font-semibold text-white">{selectedSeatLabels.length}</span>
+                            </div>
+                            <div className="mt-3 flex items-center justify-between border-t border-slate-700 pt-3 text-base font-bold text-white">
+                                <span>Total a cobrar</span>
+                                <span>S/. {selectedSeatsTotal.toFixed(2)}</span>
+                            </div>
+                        </div>
+
+                        <div className="mt-6 flex gap-3">
+                            <button
+                                onClick={() => setShowSeatConfirm(false)}
+                                className="flex-1 rounded-lg bg-slate-700 py-2 font-semibold text-white transition-colors hover:bg-slate-600"
+                            >
+                                Revisar
+                            </button>
+                            <button
+                                onClick={() => {
+                                    setShowSeatConfirm(false);
+                                    goToDulceria();
+                                }}
+                                className="flex-1 rounded-lg bg-emerald-600 py-2 font-semibold text-white transition-colors hover:bg-emerald-700"
+                            >
+                                Confirmar
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
         );
     };
 
@@ -464,7 +631,7 @@ export const DetallePelicula = () => {
                             </h2>
 
                             <button
-                                onClick={goToDulceria}
+                                onClick={() => setShowSeatConfirm(true)}
                                 disabled={selectedSeats.length === 0}
                                 className="inline-flex min-w-0 items-center gap-2 rounded-full bg-[#2e8b0f] px-3 py-2 text-[0.7rem] font-medium text-white transition-colors hover:bg-[#369f12] disabled:cursor-not-allowed disabled:bg-slate-700 sm:gap-3 sm:px-5 sm:py-3 sm:text-xl"
                             >
@@ -482,8 +649,8 @@ export const DetallePelicula = () => {
                         className="flex-1 min-h-0 overflow-y-auto px-3 py-3 sm:px-6 sm:py-6 lg:px-8"
                     >
                         <div className="mx-auto w-full max-w-7xl pb-8">
-                            <div className="grid gap-4 lg:grid-cols-[340px_1fr] lg:gap-6">
-                            <aside className="rounded-[1.5rem] border border-slate-700/60 bg-[#061321] p-3 shadow-2xl shadow-black/30 sm:rounded-[2rem] sm:p-5">
+                            <div className="grid gap-4 lg:grid-cols-[340px_1fr] lg:gap-6 lg:items-start">
+                            <aside className="max-h-[calc(100vh-10rem)] overflow-y-auto rounded-[1.5rem] border border-slate-700/60 bg-[#061321] p-3 shadow-2xl shadow-black/30 sm:rounded-[2rem] sm:p-5 lg:sticky lg:top-4">
                                 <div className="overflow-hidden rounded-[1.5rem] border-4 border-[#0e1c2c] sm:rounded-[2rem]">
                                     <img
                                         src={poster}
@@ -492,12 +659,13 @@ export const DetallePelicula = () => {
                                     />
                                 </div>
 
-                                <h3 className="mx-auto mt-3 max-w-[14ch] px-2 text-center text-[clamp(1.2rem,3.2vw,2rem)] font-black uppercase leading-[0.98] tracking-tight text-transparent break-words [text-shadow:2px_2px_0_#ff2b50] sm:mt-5 sm:text-[clamp(1.4rem,2.6vw,2.6rem)]">
+                                <h3 className="mx-auto mt-3 w-full max-w-none px-2 text-center text-[clamp(1.15rem,5vw,2rem)] font-black uppercase leading-[0.98] tracking-tight text-transparent break-words whitespace-normal [text-shadow:2px_2px_0_#ff2b50] sm:mt-5 sm:text-[clamp(1.35rem,3vw,2.6rem)] lg:text-[clamp(1.5rem,2vw,2.9rem)]">
                                     {titulo}
                                 </h3>
 
                                 <p className="mt-2 text-center text-sm font-bold text-[#5fa6ff] sm:mt-6 sm:text-2xl">
-                                    2D, Regular, Doblada
+                                    {selectedShow.formato || 'Formato por definir'}
+                                    {selectedShow.idioma ? `, ${selectedShow.idioma}` : ''}
                                 </p>
 
                                 <div className="mt-3 space-y-3 sm:mt-6 sm:space-y-5">
@@ -534,19 +702,19 @@ export const DetallePelicula = () => {
                                     <div className="grid grid-cols-1 gap-2 text-sm font-bold sm:gap-3 sm:text-lg">
                                         <div className="flex items-center gap-4">
                                             <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-white bg-white text-slate-950 sm:h-10 sm:w-10">
-                                                <Armchair className="h-4 w-4 sm:h-6 sm:w-6" />
+                                                <SeatGlyph seatSize={20} showNumber={false} />
                                             </span>
                                             <span>Disponible</span>
                                         </div>
                                         <div className="flex items-center gap-4">
                                             <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-emerald-400 bg-emerald-400 text-slate-950 sm:h-10 sm:w-10">
-                                                <Armchair className="h-4 w-4 sm:h-6 sm:w-6" />
+                                                <SeatGlyph seatSize={20} selected showNumber={false} />
                                             </span>
                                             <span>Seleccionado</span>
                                         </div>
                                         <div className="flex items-center gap-4">
                                             <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-700 bg-slate-700 text-slate-300 sm:h-10 sm:w-10">
-                                                <Armchair className="h-4 w-4 sm:h-6 sm:w-6" />
+                                                <SeatGlyph seatSize={20} unavailable showNumber={false} />
                                             </span>
                                             <span>Ocupado</span>
                                         </div>
@@ -672,10 +840,9 @@ export const DetallePelicula = () => {
                         <div className="bg-slate-800/30 backdrop-blur-sm rounded-3xl overflow-hidden border border-slate-700/50">
                             <img src={poster} alt={titulo} className="w-full h-[600px] object-cover" onError={handleImageFallback} />
                             <div className="p-6 text-center">
-                                <h2 className="text-2xl font-bold text-white mb-2">{titulo}</h2>
-                                <p className="text-gray-300 mb-4">
-                                    {genero}{duracion && `, ${duracion}`}{clasificacion && `, ${clasificacion}`}
-                                </p>
+                                <h2 className="mb-2 break-words px-1 text-center text-[clamp(1.4rem,5vw,2.2rem)] font-bold leading-tight text-white sm:text-[clamp(1.7rem,3vw,2.8rem)] lg:text-[clamp(1.8rem,1.7vw,3rem)]">
+                                    {titulo}
+                                </h2>
                                 <div className="mb-4 flex flex-wrap justify-center gap-2">
                                     {generoChips.map((item) => (
                                         <span
@@ -721,16 +888,56 @@ export const DetallePelicula = () => {
 
                         {/* Trailer desktop */}
                         <div className="bg-slate-800/30 backdrop-blur-sm rounded-3xl overflow-hidden border border-slate-700/50 hidden lg:block">
-                            <div className="relative group cursor-pointer" onClick={() => videoId && setShowTrailer(true)}>
-                                <img src={trailerPreview} alt="Vista previa del tráiler" className="w-full h-[400px] object-cover" onError={handleImageFallback} />
-                                <div className="absolute inset-0 bg-black/40 flex items-center justify-center">
-                                    <div className="text-center">
-                                        <div className="w-20 h-20 rounded-full border-4 border-white flex items-center justify-center mb-4 mx-auto group-hover:scale-110 transition-transform">
-                                            <Play className="w-10 h-10 text-white fill-white ml-1" />
+                            <div className="relative">
+                                {showTrailer && videoId ? (
+                                    <>
+                                        <iframe
+                                            className="h-[400px] w-full"
+                                            src={`https://www.youtube.com/embed/${videoId}?autoplay=1`}
+                                            title="YouTube video player"
+                                            frameBorder="0"
+                                            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                                            allowFullScreen
+                                        />
+                                        <button
+                                            onClick={() => setShowTrailer(false)}
+                                            className="absolute right-4 top-4 rounded-full bg-black/70 px-4 py-2 text-sm font-semibold text-white backdrop-blur-sm transition-colors hover:bg-black/90"
+                                        >
+                                            Cerrar tráiler
+                                        </button>
+                                        {trailerUrl && (
+                                            <a
+                                                href={trailerUrl}
+                                                target="_blank"
+                                                rel="noreferrer"
+                                                className="absolute bottom-4 left-4 rounded-full bg-black/60 px-4 py-2 text-sm font-semibold text-white backdrop-blur-sm transition-colors hover:bg-black/80"
+                                            >
+                                                Abrir en YouTube
+                                            </a>
+                                        )}
+                                    </>
+                                ) : (
+                                    <button
+                                        type="button"
+                                        onClick={() => videoId && setShowTrailer(true)}
+                                        className="group relative block w-full"
+                                    >
+                                        <img
+                                            src={trailerPreview}
+                                            alt="Vista previa del tráiler"
+                                            className="h-[400px] w-full object-cover"
+                                            onError={handleImageFallback}
+                                        />
+                                        <div className="absolute inset-0 flex items-center justify-center bg-black/40">
+                                            <div className="text-center">
+                                                <div className="mx-auto mb-4 flex h-20 w-20 items-center justify-center rounded-full border-4 border-white transition-transform group-hover:scale-110">
+                                                    <Play className="ml-1 h-10 w-10 fill-white text-white" />
+                                                </div>
+                                                <h3 className="text-2xl font-bold text-white">{textoTrailer}</h3>
+                                            </div>
                                         </div>
-                                        <h3 className="text-white text-2xl font-bold">{textoTrailer}</h3>
-                                    </div>
-                                </div>
+                                    </button>
+                                )}
                             </div>
                         </div>
 
@@ -745,16 +952,28 @@ export const DetallePelicula = () => {
                                     {showtimesError}
                                 </div>
                             ) : showtimeCatalog.length > 0 ? (
-                                showtimeCatalog.map(({ cinema, funciones }) => (
+                                showtimeCatalog.map(({ cinema, funciones }) => {
+                                    const funcionesOrdenadas = [...funciones].sort((a, b) => {
+                                        const timeA = getShowtimeSortValue(a);
+                                        const timeB = getShowtimeSortValue(b);
+
+                                        if (timeA !== timeB) {
+                                            return timeA - timeB;
+                                        }
+
+                                        return (Number(a.id_funcion) || 0) - (Number(b.id_funcion) || 0);
+                                    });
+
+                                    return (
                                     <div key={cinema.id} className="bg-gradient-to-r from-slate-700/30 to-slate-800/30 backdrop-blur-sm rounded-3xl p-6 border border-slate-700/50">
                                         <h3 className="text-white text-xl font-bold mb-2">{cinema.nombre}</h3>
                                         <p className="mb-4 text-sm text-slate-300">{cinema.ciudad || 'Ciudad no disponible'}</p>
-                                        <div className="flex flex-wrap gap-3">
-                                            {funciones.map((funcion) => (
+                                        <div className="flex flex-nowrap gap-3 overflow-x-auto pb-2">
+                                            {funcionesOrdenadas.map((funcion) => (
                                                 <button
                                                     key={funcion.id_funcion}
                                                     onClick={() => openSeatSelector(cinema, funcion)}
-                                                    className="min-w-[120px] rounded-2xl border border-red-400/40 bg-red-500 px-4 py-3 text-left text-white shadow-lg transition-all duration-300 hover:scale-105 hover:bg-red-600"
+                                                    className="min-w-[120px] shrink-0 rounded-2xl border border-red-400/40 bg-red-500 px-4 py-3 text-left text-white shadow-lg transition-all duration-300 hover:scale-105 hover:bg-red-600"
                                                 >
                                                     <div className="text-lg font-bold">
                                                         {new Date(funcion.fecha_hora_inicio).toLocaleTimeString('es-PE', {
@@ -772,7 +991,8 @@ export const DetallePelicula = () => {
                                             ))}
                                         </div>
                                     </div>
-                                ))
+                                    );
+                                })
                             ) : (
                                 <div className="rounded-3xl border border-slate-700/50 bg-slate-800/30 p-6 text-slate-200">
                                     No hay funciones disponibles para esta película por el momento.
@@ -782,16 +1002,56 @@ export const DetallePelicula = () => {
 
                         {/* Trailer móvil */}
                         <div className="bg-slate-800/30 backdrop-blur-sm rounded-3xl overflow-hidden border border-slate-700/50 lg:hidden">
-                            <div className="relative group cursor-pointer" onClick={() => videoId && setShowTrailer(true)}>
-                                <img src={trailerPreview} alt="Vista previa del tráiler" className="w-full h-[400px] object-cover" onError={handleImageFallback} />
-                                <div className="absolute inset-0 bg-black/40 flex items-center justify-center">
-                                    <div className="text-center">
-                                        <div className="w-20 h-20 rounded-full border-4 border-white flex items-center justify-center mb-4 mx-auto group-hover:scale-110 transition-transform">
-                                            <Play className="w-10 h-10 text-white fill-white ml-1" />
+                            <div className="relative">
+                                {showTrailer && videoId ? (
+                                    <>
+                                        <iframe
+                                            className="h-[400px] w-full"
+                                            src={`https://www.youtube.com/embed/${videoId}?autoplay=1`}
+                                            title="YouTube video player"
+                                            frameBorder="0"
+                                            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                                            allowFullScreen
+                                        />
+                                        <button
+                                            onClick={() => setShowTrailer(false)}
+                                            className="absolute right-3 top-3 rounded-full bg-black/70 px-3 py-2 text-xs font-semibold text-white backdrop-blur-sm transition-colors hover:bg-black/90"
+                                        >
+                                            Cerrar
+                                        </button>
+                                        {trailerUrl && (
+                                            <a
+                                                href={trailerUrl}
+                                                target="_blank"
+                                                rel="noreferrer"
+                                                className="absolute bottom-3 left-3 rounded-full bg-black/60 px-3 py-2 text-xs font-semibold text-white backdrop-blur-sm transition-colors hover:bg-black/80"
+                                            >
+                                                YouTube
+                                            </a>
+                                        )}
+                                    </>
+                                ) : (
+                                    <button
+                                        type="button"
+                                        onClick={() => videoId && setShowTrailer(true)}
+                                        className="group relative block w-full"
+                                    >
+                                        <img
+                                            src={trailerPreview}
+                                            alt="Vista previa del tráiler"
+                                            className="h-[400px] w-full object-cover"
+                                            onError={handleImageFallback}
+                                        />
+                                        <div className="absolute inset-0 flex items-center justify-center bg-black/40">
+                                            <div className="text-center">
+                                                <div className="mx-auto mb-4 flex h-20 w-20 items-center justify-center rounded-full border-4 border-white transition-transform group-hover:scale-110">
+                                                    <Play className="ml-1 h-10 w-10 fill-white text-white" />
+                                                </div>
+                                                <h3 className="text-2xl font-bold text-white">{textoTrailer}</h3>
+                                            </div>
                                         </div>
-                                        <h3 className="text-white text-2xl font-bold">{textoTrailer}</h3>
-                                    </div>
-                                </div>
+                                    </button>
+                                )}
                             </div>
                         </div>
 
@@ -804,7 +1064,20 @@ export const DetallePelicula = () => {
                         {/* Director */}
                         <div className="bg-slate-800/30 backdrop-blur-sm rounded-3xl p-6 border border-slate-700/50">
                             <h3 className="text-white text-2xl font-bold mb-4">Director</h3>
-                            <p className="text-gray-300">{director}</p>
+                            <div className="flex flex-wrap gap-2">
+                                {directores.length ? directores.map((item) => (
+                                    <span
+                                        key={item}
+                                        className={chipStyle}
+                                    >
+                                        {item}
+                                    </span>
+                                )) : (
+                                    <span className={chipStyle}>
+                                        {director}
+                                    </span>
+                                )}
+                            </div>
                         </div>
 
                         {/* Reparto */}
@@ -850,7 +1123,7 @@ export const DetallePelicula = () => {
                 </div>
 
                 {/* Modal Trailer */}
-                {showTrailer && videoId && (
+                {false && videoId && (
                     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-sm p-4"
                         onClick={() => setShowTrailer(false)}
                     >
@@ -915,20 +1188,20 @@ export const DetallePelicula = () => {
 
                                 <div className="space-y-3">
                                     <div className="flex items-center gap-3">
-                                        <span className="inline-flex h-9 w-10 items-center justify-center rounded-2xl border border-white bg-white text-slate-950 shadow-sm">
-                                            <Armchair className="h-4 w-4" />
+                                        <span className="inline-flex h-12 w-12 items-center justify-center rounded-xl bg-white shadow-sm">
+                                            <SeatGlyph seatSize={24} showNumber={false} />
                                         </span>
                                         <span>Disponible: lo puedes seleccionar.</span>
                                     </div>
                                     <div className="flex items-center gap-3">
-                                        <span className="inline-flex h-9 w-10 items-center justify-center rounded-2xl border border-emerald-400 bg-emerald-400 text-slate-950 shadow-sm">
-                                            <Armchair className="h-4 w-4" />
+                                        <span className="inline-flex h-12 w-12 items-center justify-center rounded-xl bg-[#1D9E75] shadow-sm">
+                                            <SeatGlyph seatSize={24} selected showNumber={false} />
                                         </span>
                                         <span>Seleccionado: ya lo elegiste para tu compra.</span>
                                     </div>
                                     <div className="flex items-center gap-3">
-                                        <span className="inline-flex h-9 w-10 items-center justify-center rounded-2xl border border-slate-700 bg-slate-700 text-slate-300 shadow-sm">
-                                            <Armchair className="h-4 w-4" />
+                                        <span className="inline-flex h-12 w-12 items-center justify-center rounded-xl bg-red-500 shadow-sm">
+                                            <SeatGlyph seatSize={24} unavailable showNumber={false} />
                                         </span>
                                         <span>Ocupado: ya no está disponible.</span>
                                     </div>
@@ -991,6 +1264,8 @@ export const DetallePelicula = () => {
                     </div>
                 )}
             </div>
+
+            <SeatConfirmationModal />
 
             {selectedShow && <SeatSelector />}
 

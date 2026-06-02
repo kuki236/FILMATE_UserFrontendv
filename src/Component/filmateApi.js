@@ -88,6 +88,23 @@ export function normalizeMovie(movie) {
         .filter(Boolean)
     : [];
 
+  const directorsFromRelations = Array.isArray(movie.directores)
+    ? movie.directores
+        .map((relation) => relation?.director?.nombre || relation?.nombre || relation?.director_nombre || '')
+        .filter(Boolean)
+    : [];
+
+  const directorValue =
+    typeof movie.director === 'string'
+      ? movie.director.trim()
+      : movie.director?.nombre || movie.director?.nombre_director || movie.director?.director_nombre || '';
+
+  const directorText =
+    directorValue ||
+    directorsFromRelations.join(', ') ||
+    (typeof movie.directores === 'string' ? movie.directores : '') ||
+    'Por definir';
+
   return {
     id: movie.id_pelicula,
     titulo: movie.titulo,
@@ -100,7 +117,8 @@ export function normalizeMovie(movie) {
     trailerUrl: movie.url_trailer || '',
     trailer: 'TRÁILER OFICIAL',
     sinopsis: movie.sinopsis || 'Sinopsis próxima a actualizar.',
-    director: movie.director || 'Por definir',
+    director: directorText,
+    directores: directorsFromRelations,
     reparto: movie.reparto || actorsFromRelations.join(', ') || 'Por definir',
     estreno: movie.categoria_cartelera === 'Estreno',
     categoriaCartelera: movie.categoria_cartelera,

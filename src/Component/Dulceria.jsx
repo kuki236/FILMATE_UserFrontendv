@@ -595,6 +595,23 @@ export const Dulceria = () => {
 
   const selectedPayment = paymentOptions.find((option) => option.id === selectedPaymentMethod);
 
+  const volverAAsientos = () => {
+    if (bookingContext?.movieId) {
+      navigate(`/menuPrincipal/detallePelicula/${bookingContext.movieId}`, {
+        state: bookingContext.returnToSeatSelection
+          ? {
+              movieState: bookingContext.returnToSeatSelection.movieState || null,
+              selectedShow: bookingContext.returnToSeatSelection.selectedShow || null,
+              selectedSeats: bookingContext.returnToSeatSelection.selectedSeats || [],
+            }
+          : bookingContext.movieState || null,
+      });
+      return;
+    }
+
+    navigate(-1);
+  };
+
   const renderCategory = (key, productos) => (
     <section className="mb-12">
       <div className="mb-5">
@@ -614,7 +631,7 @@ export const Dulceria = () => {
 
         <div
           ref={sectionRefs[key]}
-          className="product-scrollbar flex gap-4 overflow-x-auto scroll-smooth pb-3 pr-2 pl-12 snap-x snap-mandatory sm:pl-14 sm:pr-14"
+          className="product-scrollbar flex gap-4 overflow-x-auto scroll-smooth pb-3 pt-2 pr-2 pl-12 snap-x snap-mandatory sm:pl-14 sm:pr-14"
           onScroll={() => updateScrollState(key)}
         >
           {productos.map((producto) => {
@@ -623,12 +640,13 @@ export const Dulceria = () => {
             return (
               <article
                 key={producto.id}
-                className={`group product-card relative flex-shrink-0 overflow-hidden rounded-2xl border bg-slate-900 transition-all hover:-translate-y-1 hover:border-blue-500 hover:shadow-lg hover:shadow-blue-500/10 snap-start ${
+                className={`group product-card relative flex-shrink-0 overflow-hidden rounded-2xl border bg-slate-900 transition-all hover:border-blue-500 hover:shadow-lg hover:shadow-blue-500/10 snap-start ${
                   lastAddedId === producto.id ? 'border-emerald-400 ring-2 ring-emerald-400/60 animate-pulse' : 'border-slate-700'
                 }`}
               >
                 {lastAddedId === producto.id && (
-                  <div className="absolute right-3 top-3 z-10 rounded-full bg-emerald-500 px-3 py-1 text-xs font-bold text-white shadow-lg shadow-emerald-500/30">
+                  <div className="absolute left-3 top-3 z-30 flex items-center gap-1 rounded-full bg-emerald-500 px-3 py-1 text-xs font-bold text-white shadow-lg shadow-emerald-500/30">
+                    <CheckCircle2 className="h-3.5 w-3.5" />
                     Agregado
                   </div>
                 )}
@@ -714,6 +732,16 @@ export const Dulceria = () => {
                     {bookingContext.asientos?.length ? bookingContext.asientos.join(', ') : 'Sin asientos'}
                   </p>
                 </div>
+              </div>
+
+              <div className="mt-4 flex justify-end">
+                <button
+                  onClick={volverAAsientos}
+                  className="inline-flex items-center gap-2 rounded-full border border-sky-400/40 bg-slate-950/40 px-4 py-2 text-sm font-semibold text-sky-200 transition-colors hover:border-sky-300 hover:bg-slate-950"
+                >
+                  <ArrowLeft className="h-4 w-4" />
+                  Volver a asientos
+                </button>
               </div>
             </div>
           )}
@@ -899,9 +927,9 @@ export const Dulceria = () => {
 
       {showPayment && (
         <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/70 p-3 sm:items-center sm:p-4">
-          <div className="w-full max-w-[95vw] overflow-hidden rounded-2xl border border-slate-700 bg-slate-900 shadow-2xl sm:max-w-md">
-            <div className="flex items-center justify-between border-b border-slate-700 px-4 py-4 sm:px-6">
-              <h2 className="text-lg font-bold text-white sm:text-xl">Pago simulado</h2>
+          <div className="flex max-h-[92vh] w-full max-w-[95vw] flex-col overflow-y-auto rounded-2xl border border-slate-700 bg-slate-900 shadow-2xl sm:max-w-md">
+            <div className="shrink-0 flex items-center justify-between border-b border-slate-700 px-4 py-4 sm:px-6">
+              <h2 className="text-lg font-bold text-white sm:text-xl">Pago</h2>
               <button
                 onClick={() => {
                   requestExit('verification');
@@ -1000,7 +1028,7 @@ export const Dulceria = () => {
                 </div>
               </div>
 
-              <div className="flex gap-3">
+              <div className="mt-6 flex gap-3 pb-1">
                 <button
                   onClick={() => {
                     requestExit('verification');

@@ -13,3 +13,9 @@ code {
   font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
     monospace;
 }
+/* Ensure side panels can scroll when their content exceeds viewport height */
+#root aside {
+  max-height: calc(100vh - 8rem);
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
