@@ -64,8 +64,8 @@ export const Cines = () => {
     setSelectedCine(null);
   };
 
-  const mapSrc = (direccion) =>
-    `https://www.google.com/maps?q=${encodeURIComponent(direccion)}&output=embed`;
+  const mapSrc = (cine) =>
+    cine?.mapa || `https://www.google.com/maps?q=${encodeURIComponent(cine?.direccion || '')}&output=embed`;
 
   return (
     <div className="min-h-screen bg-slate-950 flex flex-col">
@@ -100,7 +100,7 @@ export const Cines = () => {
                         loading="lazy"
                         allowFullScreen=""
                         referrerPolicy="no-referrer-when-downgrade"
-                        src={mapSrc(cine.direccion)}
+                        src={mapSrc(cine)}
                       ></iframe>
                     </div>
                   </div>
@@ -169,7 +169,7 @@ export const Cines = () => {
                 loading="lazy"
                 allowFullScreen=""
                 referrerPolicy="no-referrer-when-downgrade"
-                src={mapSrc(selectedCine.direccion)}
+                src={mapSrc(selectedCine)}
               ></iframe>
             </div>
 

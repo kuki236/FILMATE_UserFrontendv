@@ -288,17 +288,20 @@ export const MenuPrincipal = () => {
                 return false;
             }
 
-            if (selectedCinema === 'all' && selectedDay === 'all') {
-                return true;
-            }
-
             return matchingMovieIds.has(String(pelicula.id));
         });
 
         return result;
     }, [peliculasData, selectedCinema, selectedDay, selectedGenre, showtimeCatalog]);
 
-    const displayPeliculas = filteredPeliculas.length > 0 ? filteredPeliculas : [];
+    const displayPeliculas = useMemo(
+        () =>
+            filteredPeliculas
+                .slice()
+                .sort((a, b) => (b.estreno ? 1 : 0) - (a.estreno ? 1 : 0)),
+        [filteredPeliculas]
+    );
+    const isCatalogLoading = loading || filtersLoading;
     const hasActiveFilters = selectedCinema !== 'all' || selectedDay !== 'hoy' || selectedGenre !== 'all';
     const clearFilters = () => {
         setSelectedDay('hoy');
@@ -320,10 +323,14 @@ export const MenuPrincipal = () => {
                 <section className="mb-16">
                     <h2 className="text-4xl font-bold text-white mb-8">Recomendaciones</h2>
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-                        {loading && allPeliculasSorted.length === 0 ? (
+                        {isCatalogLoading ? (
                             <div className="col-span-full text-gray-300">Cargando películas...</div>
+                        ) : displayPeliculas.length === 0 ? (
+                            <div className="col-span-full rounded-3xl border border-slate-700/50 bg-slate-800/30 p-6 text-slate-300">
+                                No hay peliculas con funciones disponibles en la fecha seleccionada.
+                            </div>
                         ) : (
-                            allPeliculasSorted.slice(0, 3).map((pelicula, i) => (
+                            displayPeliculas.slice(0, 3).map((pelicula, i) => (
                             <div
                                 key={i}
                                 onClick={() => irADetalle(pelicula)}
@@ -439,16 +446,17 @@ export const MenuPrincipal = () => {
                 {/* Cartelera */}
                 <section>
                     <h2 className="text-4xl font-bold text-white mb-8">Cartelera</h2>
-                    {hasActiveFilters && displayPeliculas.length === 0 ? (
+                    {isCatalogLoading ? (
                         <div className="rounded-3xl border border-slate-700/50 bg-slate-800/30 p-6 text-slate-300">
-                            No hay películas que coincidan con los filtros seleccionados.
+                            Cargando funciones de la BD...
+                        </div>
+                    ) : displayPeliculas.length === 0 ? (
+                        <div className="rounded-3xl border border-slate-700/50 bg-slate-800/30 p-6 text-slate-300">
+                            No hay peliculas con funciones para la fecha seleccionada.
                         </div>
                     ) : (
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                            {displayPeliculas
-                                .slice() // para no mutar el original
-                                .sort((a, b) => (b.estreno ? 1 : 0) - (a.estreno ? 1 : 0))
-                                .map((pelicula, i) => (
+                            {displayPeliculas.map((pelicula, i) => (
                                 <div
                                     key={i}
                                     onClick={() => irADetalle(pelicula)}

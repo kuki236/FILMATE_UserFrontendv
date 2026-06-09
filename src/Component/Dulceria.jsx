@@ -5,7 +5,7 @@ import Footer from './Footer.jsx';
 import { AlertTriangle, ArrowLeft, Banknote, CheckCircle2, CreditCard, Minus, Plus, ShoppingCart, Smartphone, X } from 'lucide-react';
 import { QRCodeCanvas } from 'qrcode.react';
 import jsPDF from 'jspdf';
-import { checkoutOrder } from './filmateApi';
+import { checkoutOrder, getSnackProducts } from './filmateApi';
 import { getAuthSession } from './authSession';
 
 const FALLBACK_IMAGE = 'https://placehold.co/400x400/0f172a/f8fafc?text=Filmate';
@@ -45,15 +45,23 @@ const productosData = {
       imagen: 'https://images.pexels.com/photos/9459202/pexels-photo-9459202.jpeg',
     },
   ],
+  dulces: [
+    {
+      id: 5,
+      nombre: 'M&M Compartir',
+      descripcion: 'Bolsa grande de chocolates.',
+      precio: 12,
+      imagen: 'https://placehold.co/800x800/0f172a/f8fafc?text=Dulces',
+    },
+  ],
 };
 
 const categoryLabels = {
   combos: 'Combos',
   popcorn: 'Cancha / Popcorn',
   bebidas: 'Bebidas',
+  dulces: 'Dulces',
 };
-
-const DEFAULT_TARIFF_PRICE = 22.5;
 
 const paymentOptions = [
   {
@@ -82,7 +90,7 @@ const paymentOptions = [
   },
 ];
 
-function TicketContent({ carrito, total, pedidoNumber, fechaCompra, bookingContext, reservationId }) {
+function TicketContent({ carrito, total, pedidoNumber, fechaCompra, bookingContext, transactionId, qrValue }) {
   return (
     <div className="overflow-hidden rounded-3xl border border-slate-700 bg-slate-950 text-white shadow-2xl">
       <div className="border-b border-slate-800 bg-gradient-to-r from-slate-900 via-slate-950 to-slate-900 px-6 py-5">
@@ -115,9 +123,9 @@ function TicketContent({ carrito, total, pedidoNumber, fechaCompra, bookingConte
             <div>
               <p className="text-sm text-slate-400">Numero de pedido</p>
               <p className="text-2xl font-bold text-white">{pedidoNumber}</p>
-              {reservationId && (
+              {transactionId && (
                 <p className="mt-1 text-xs uppercase tracking-[0.2em] text-blue-300">
-                  Reserva #{reservationId}
+                  Transaccion #{transactionId}
                 </p>
               )}
             </div>
@@ -159,7 +167,7 @@ function TicketContent({ carrito, total, pedidoNumber, fechaCompra, bookingConte
         <div className="rounded-2xl border border-slate-800 bg-white p-4">
           <div className="mx-auto flex h-[210px] w-[210px] items-center justify-center">
             <QRCodeCanvas
-              value={`FILMATE-${pedidoNumber}-${total.toFixed(2)}`}
+              value={qrValue || `FILMATE-${pedidoNumber}-${total.toFixed(2)}`}
               size={170}
               level="H"
               includeMargin
@@ -191,6 +199,9 @@ export const Dulceria = () => {
   const [isGeneratingPDF, setIsGeneratingPDF] = useState(false);
   const [checkoutError, setCheckoutError] = useState('');
   const [checkoutResult, setCheckoutResult] = useState(null);
+  const [productosPorCategoria, setProductosPorCategoria] = useState(productosData);
+  const [labelsPorCategoria, setLabelsPorCategoria] = useState(categoryLabels);
+  const [snacksError, setSnacksError] = useState('');
   const [skipSnacksForReservation, setSkipSnacksForReservation] = useState(false);
   const [lastAddedId, setLastAddedId] = useState(null);
   const [selectedPaymentMethod, setSelectedPaymentMethod] = useState('tarjeta');
@@ -218,12 +229,14 @@ export const Dulceria = () => {
     combos: { atStart: true, atEnd: false },
     popcorn: { atStart: true, atEnd: false },
     bebidas: { atStart: true, atEnd: false },
+    dulces: { atStart: true, atEnd: false },
   });
   const ticketRef = useRef(null);
   const sectionRefs = {
     combos: useRef(null),
     popcorn: useRef(null),
     bebidas: useRef(null),
+    dulces: useRef(null),
   };
   const navigate = useNavigate();
   const location = useLocation();
@@ -237,10 +250,19 @@ export const Dulceria = () => {
 
   const snacksTotal = carrito.reduce((sum, item) => sum + item.precio * item.cantidad, 0);
   const seatsCount = bookingContext?.asientos?.length || 0;
-  const reservationTotal = isSeatFlow ? seatsCount * DEFAULT_TARIFF_PRICE : 0;
+  const seatPrice = Number(bookingContext?.precio_base || bookingContext?.precioBase || 0);
+  const reservationTotal = isSeatFlow ? seatsCount * seatPrice : 0;
   const total = snacksTotal + reservationTotal;
   const paymentSnackTotal = isSeatFlow && skipSnacksForReservation ? 0 : snacksTotal;
   const paymentTotal = isSeatFlow ? reservationTotal + paymentSnackTotal : total;
+  const transactionId = checkoutResult?.id_transaccion || checkoutResult?.transaccion?.id_transaccion;
+  const receiptCart = isSeatFlow && skipSnacksForReservation ? [] : carrito;
+  const receiptTotal = Number(checkoutResult?.monto_total ?? checkoutResult?.transaccion?.monto_total ?? paymentTotal);
+  const qrValue =
+    checkoutResult?.qr?.payload_json ||
+    checkoutResult?.qr_payload?.payload_json ||
+    checkoutResult?.boletos?.map((ticket) => ticket.codigo_qr_token).filter(Boolean).join('|') ||
+    `FILMATE-${transactionId || pedidoNumber}-${receiptTotal.toFixed(2)}`;
 
   useEffect(() => {
     try {
@@ -250,6 +272,52 @@ export const Dulceria = () => {
       // Si el almacenamiento falla, la compra sigue funcionando en memoria.
     }
   }, [carrito, pedidoNumber, fechaCompra]);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadSnacks = async () => {
+      try {
+        const { categories, products } = await getSnackProducts();
+        if (!isMounted) return;
+
+        if (!products.length) {
+          setProductosPorCategoria(productosData);
+          setLabelsPorCategoria(categoryLabels);
+          setSnacksError('La API no devolvio productos de dulceria, se muestran datos locales.');
+          return;
+        }
+
+        const nextLabels = { ...categoryLabels };
+        categories.forEach((category) => {
+          nextLabels[category.key] = category.label;
+        });
+
+        const nextProducts = products.reduce((acc, product) => {
+          const key = product.categoryKey || 'dulces';
+          if (!acc[key]) acc[key] = [];
+          acc[key].push(product);
+          return acc;
+        }, {});
+
+        setProductosPorCategoria(nextProducts);
+        setLabelsPorCategoria(nextLabels);
+        setSnacksError('');
+      } catch (err) {
+        if (!isMounted) return;
+        console.error('Error cargando productos de dulceria:', err);
+        setProductosPorCategoria(productosData);
+        setLabelsPorCategoria(categoryLabels);
+        setSnacksError('No se pudo conectar con productos de dulceria, se muestran datos locales.');
+      }
+    };
+
+    loadSnacks();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   const agregarProducto = (producto) => {
     setLastAddedId(producto.id);
@@ -465,14 +533,14 @@ export const Dulceria = () => {
 
       y += 32;
       pdf.setFillColor(15, 23, 42);
-      pdf.roundedRect(marginX, y, pageWidth - marginX * 2, 12 + carrito.length * 10, 4, 4, 'F');
+      pdf.roundedRect(marginX, y, pageWidth - marginX * 2, 12 + receiptCart.length * 10, 4, 4, 'F');
       pdf.setFont('helvetica', 'bold');
       pdf.setFontSize(11);
       pdf.text('Detalle del pedido', marginX + 8, y + 8);
 
       let lineY = y + 16;
       pdf.setFont('helvetica', 'normal');
-      carrito.forEach((item) => {
+      receiptCart.forEach((item) => {
         pdf.text(`${item.cantidad} x ${item.nombre}`, marginX + 8, lineY);
         const amount = `S/. ${(item.precio * item.cantidad).toFixed(2)}`;
         pdf.text(amount, pageWidth - marginX - pdf.getTextWidth(amount), lineY);
@@ -486,7 +554,7 @@ export const Dulceria = () => {
       pdf.setFont('helvetica', 'bold');
       pdf.setFontSize(13);
       pdf.text('Total a pagar', marginX + 8, y + 10);
-      pdf.text(`S/. ${total.toFixed(2)}`, pageWidth - marginX - pdf.getTextWidth(`S/. ${total.toFixed(2)}`) - 8, y + 10);
+      pdf.text(`S/. ${receiptTotal.toFixed(2)}`, pageWidth - marginX - pdf.getTextWidth(`S/. ${receiptTotal.toFixed(2)}`) - 8, y + 10);
 
       y += 24;
       const qrCanvas = ticketRef.current.querySelector('canvas');
@@ -567,8 +635,8 @@ export const Dulceria = () => {
           id_usuario: userId,
           id_funcion: bookingContext.id_funcion,
           ids_asientos: seatIds,
-          id_tarifa: 1,
           metodo_pago: selectedPaymentMethod,
+          monto_confiteria: paymentSnackTotal,
           snacks: (skipSnacksForReservation ? [] : carrito).map((item) => ({
             id_producto: item.id,
             cantidad: item.cantidad,
@@ -615,14 +683,14 @@ export const Dulceria = () => {
   const renderCategory = (key, productos) => (
     <section className="mb-12">
       <div className="mb-5">
-        <h3 className="text-2xl font-bold text-white">{categoryLabels[key]}</h3>
+        <h3 className="text-2xl font-bold text-white">{label}</h3>
       </div>
 
       <div className="relative">
         {!scrollState[key]?.atStart && (
           <button
             onClick={() => scrollCategory(key, 'left')}
-            aria-label={`Desplazar ${categoryLabels[key]} a la izquierda`}
+            aria-label={`Desplazar ${label} a la izquierda`}
             className="absolute left-0 top-1/2 z-20 -translate-y-1/2 rounded-full border border-slate-700 bg-slate-950/90 px-3 py-3 text-white shadow-lg shadow-black/30 backdrop-blur transition-all hover:border-blue-500 hover:bg-slate-900 sm:-left-4"
           >
             <span className="text-xl leading-none">‹</span>
@@ -689,7 +757,7 @@ export const Dulceria = () => {
         {!scrollState[key]?.atEnd && (
           <button
             onClick={() => scrollCategory(key, 'right')}
-            aria-label={`Desplazar ${categoryLabels[key]} a la derecha`}
+            aria-label={`Desplazar ${label} a la derecha`}
             className="absolute right-0 top-1/2 z-20 -translate-y-1/2 rounded-full border border-slate-700 bg-slate-950/90 px-3 py-3 text-white shadow-lg shadow-black/30 backdrop-blur transition-all hover:border-blue-500 hover:bg-slate-900 sm:-right-4"
           >
             <span className="text-xl leading-none">›</span>
@@ -697,7 +765,8 @@ export const Dulceria = () => {
         )}
       </div>
     </section>
-  );
+    );
+  };
 
   return (
     <div className="min-h-screen bg-slate-950 flex flex-col">
@@ -714,6 +783,12 @@ export const Dulceria = () => {
               {pageSubtitle}
             </p>
           </div>
+
+          {snacksError && (
+            <div className="mb-8 rounded-2xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-amber-100">
+              {snacksError}
+            </div>
+          )}
 
           {bookingContext && (
             <div className="mb-8 rounded-3xl border border-blue-400/40 bg-blue-500/10 p-5 text-white shadow-lg shadow-blue-950/20">
@@ -748,9 +823,11 @@ export const Dulceria = () => {
 
           <div className="grid grid-cols-1 gap-8 lg:grid-cols-4">
             <div className="lg:col-span-3">
-              {renderCategory('combos', productosData.combos)}
-              {renderCategory('popcorn', productosData.popcorn)}
-              {renderCategory('bebidas', productosData.bebidas)}
+              {Object.entries(productosPorCategoria).map(([key, productos]) => (
+                <React.Fragment key={key}>
+                  {renderCategory(key, productos)}
+                </React.Fragment>
+              ))}
             </div>
 
             <aside className="h-fit rounded-2xl border border-slate-700 bg-slate-900 p-6 lg:sticky lg:top-24">
@@ -1134,12 +1211,13 @@ export const Dulceria = () => {
             <div className="max-h-[92vh] overflow-y-auto p-4 sm:p-6">
               <div ref={ticketRef}>
                 <TicketContent
-                  carrito={carrito}
-                  total={total}
+                  carrito={receiptCart}
+                  total={receiptTotal}
                   pedidoNumber={pedidoNumber}
                   fechaCompra={fechaCompra}
                   bookingContext={bookingContext}
-                  reservationId={checkoutResult?.id_reserva}
+                  transactionId={transactionId}
+                  qrValue={qrValue}
                 />
               </div>
 

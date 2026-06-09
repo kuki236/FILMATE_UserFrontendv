@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { User, Mail, Lock, MapPin, Phone, CheckCircle } from 'lucide-react';
+import { User, Mail, Lock, IdCard, Phone, CheckCircle } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import { registerUser } from './filmateApi';
 import { saveRegisteredSession } from './authSession';
@@ -8,6 +8,7 @@ const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const FULL_NAME_REGEX = /^[A-Za-zÁÉÍÓÚÜÑáéíóúüñ\s]+$/;
 const USERNAME_REGEX = /^[A-Za-z0-9_]{3,20}$/;
 const PHONE_REGEX = /^[0-9]{7,15}$/;
+const DOCUMENT_REGEX = /^[A-Za-z0-9]{8,15}$/;
 const REGISTRY_KEY = 'filmate-registered-users';
 
 const readRegistry = () => {
@@ -43,7 +44,7 @@ export const Registro = () => {
     nombreCompleto: '',
     nombreUsuario: '',
     email: '',
-    direccion: '',
+    numeroDocumento: '',
     contrasena: '',
     telefono: '',
   });
@@ -58,29 +59,12 @@ export const Registro = () => {
     });
   };
 
-  const splitFullName = (value) => {
-    const normalized = value.trim().replace(/\s+/g, ' ');
-    const parts = normalized.split(' ').filter(Boolean);
-
-    if (parts.length === 0) {
-      return { nombres: '', apellidos: '' };
-    }
-
-    if (parts.length === 1) {
-      return { nombres: parts[0], apellidos: 'Usuario' };
-    }
-
-    return {
-      nombres: parts.slice(0, -1).join(' '),
-      apellidos: parts.slice(-1).join(' '),
-    };
-  };
-
   const validateForm = () => {
     const fullName = formData.nombreCompleto.trim();
     const username = formData.nombreUsuario.trim();
     const email = formData.email.trim();
     const password = formData.contrasena;
+    const documentNumber = formData.numeroDocumento.trim();
     const phone = formData.telefono.trim();
 
     if (!fullName) return 'Completa tu nombre completo.';
@@ -101,6 +85,11 @@ export const Registro = () => {
     if (!password) return 'Completa tu contraseña.';
     if (password.length < 6) {
       return 'La contraseña debe tener al menos 6 caracteres.';
+    }
+
+    if (!documentNumber) return 'Completa tu numero de documento.';
+    if (!DOCUMENT_REGEX.test(documentNumber)) {
+      return 'El documento debe tener entre 8 y 15 caracteres, usando letras o numeros.';
     }
 
     if (phone) {
@@ -138,28 +127,27 @@ export const Registro = () => {
     const password = formData.contrasena;
     const nombreUsuario = formData.nombreUsuario.trim();
     const telefono = formData.telefono.trim();
-    const direccion = formData.direccion.trim();
-    const { nombres, apellidos } = splitFullName(fullName);
+    const numeroDocumento = formData.numeroDocumento.trim();
 
     try {
       setLoading(true);
 
       const createdUser = await registerUser({
-        nombres,
-        apellidos,
+        nombre: fullName,
+        username: nombreUsuario,
         correo,
-        password,
-        nombreUsuario,
+        contrasena: password,
+        id_tipo_doc: 1,
+        numero_documento: numeroDocumento,
         telefono,
-        direccion,
       });
 
       saveRegisteredSession({
         ...createdUser,
-        nombres: createdUser?.nombres || nombres,
-        apellidos: createdUser?.apellidos || apellidos,
+        nombre: createdUser?.nombre || fullName,
+        username: createdUser?.username || nombreUsuario,
         correo: createdUser?.correo || correo,
-        estado: createdUser?.estado || 'Activo',
+        estado: createdUser?.estado || createdUser?.estado_usuario || 'ACTIVO',
       });
 
       saveRegistryEntry({
@@ -294,16 +282,16 @@ export const Registro = () => {
 
               <div>
                 <label className="flex items-center text-white font-semibold mb-3 text-lg">
-                  <MapPin className="w-5 h-5 text-red-500 mr-2" />
-                  Dirección (opcional)
+                  <IdCard className="w-5 h-5 text-red-500 mr-2" />
+                  Documento
                 </label>
                 <input
                   type="text"
-                  name="direccion"
-                  value={formData.direccion}
+                  name="numeroDocumento"
+                  value={formData.numeroDocumento}
                   onChange={handleChange}
                   className="w-full px-4 py-3.5 bg-slate-700/50 border border-slate-600 rounded-xl text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-transparent transition-all"
-                  placeholder="Ingresa tu dirección (opcional)"
+                  placeholder="DNI, CE o RUC"
                 />
               </div>
 
