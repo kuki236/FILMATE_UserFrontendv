@@ -27,15 +27,30 @@ const handleImageFallback = (event) => {
     event.currentTarget.src = FALLBACK_MEDIA_IMAGE;
 };
 
+const movieSkeletons = Array.from({ length: 6 }, (_, index) => index);
+
+const MovieCardSkeleton = ({ large = false }) => (
+    <div className="overflow-hidden rounded-3xl border border-slate-700/50 bg-slate-800/30">
+        <div className={`${large ? 'h-[550px]' : 'h-[420px]'} animate-pulse bg-slate-700/50`} />
+        <div className="space-y-3 p-5">
+            <div className="mx-auto h-5 w-2/3 animate-pulse rounded-full bg-slate-700/60" />
+            <div className="mx-auto h-4 w-1/2 animate-pulse rounded-full bg-slate-700/40" />
+        </div>
+    </div>
+);
+
 export const MenuPrincipal = () => {
     const navigate = useNavigate();
     const [peliculasData, setPeliculasData] = useState([]);
     const [cinemasData, setCinemasData] = useState([]);
-    const [showtimeCatalog, setShowtimeCatalog] = useState([]);
+    const [availableDays, setAvailableDays] = useState([]);
+    const [filteredShowtimes, setFilteredShowtimes] = useState([]);
     const [loading, setLoading] = useState(true);
     const [filtersLoading, setFiltersLoading] = useState(true);
+    const [showtimesFilterLoading, setShowtimesFilterLoading] = useState(false);
+    const [loadedShowtimeFilterKey, setLoadedShowtimeFilterKey] = useState('');
     const [error, setError] = useState('');
-    const [selectedDay, setSelectedDay] = useState('hoy');
+    const [selectedDay, setSelectedDay] = useState('');
     const [selectedCinema, setSelectedCinema] = useState('all');
     const [selectedGenre, setSelectedGenre] = useState('all');
     const LIMA_TIME_ZONE = 'America/Lima';
@@ -49,12 +64,6 @@ export const MenuPrincipal = () => {
             }),
         []
     );
-
-    const days = [
-        { value: 'hoy', label: 'Hoy' },
-        { value: 'manana', label: 'Mañana' },
-        { value: 'pasado', label: 'Pasado mañana' },
-    ];
 
     const normalizeText = (value) =>
         String(value || '')
@@ -98,6 +107,28 @@ export const MenuPrincipal = () => {
         const utcNoon = Date.UTC(year, month - 1, day, 12);
         const targetDate = new Date(utcNoon + offsetDays * 24 * 60 * 60 * 1000);
         return formatDateKey(targetDate);
+    };
+
+    const formatDayLabel = (dateKey) => {
+        const relativeLabels = {
+            [getOffsetDateKey(0)]: 'Hoy',
+            [getOffsetDateKey(1)]: 'Mañana',
+            [getOffsetDateKey(2)]: 'Pasado mañana',
+        };
+
+        if (relativeLabels[dateKey]) return relativeLabels[dateKey];
+
+        const parsedDate = new Date(`${dateKey}T12:00:00`);
+        if (Number.isNaN(parsedDate.getTime())) return dateKey;
+
+        const label = new Intl.DateTimeFormat('es-PE', {
+            timeZone: LIMA_TIME_ZONE,
+            weekday: 'short',
+            day: '2-digit',
+            month: 'short',
+        }).format(parsedDate);
+
+        return label.charAt(0).toUpperCase() + label.slice(1);
     };
 
     useEffect(() => {
@@ -148,66 +179,35 @@ export const MenuPrincipal = () => {
                 if (!isMounted) return;
                 setCinemasData(cinemas);
 
-                const dayKeys = {
-                    hoy: getOffsetDateKey(0),
-                    manana: getOffsetDateKey(1),
-                    pasado: getOffsetDateKey(2),
-                };
+                const nextDateKeys = Array.from({ length: 14 }, (_, index) => getOffsetDateKey(index)).filter(Boolean);
+                const dayEntries = await Promise.all(
+                    nextDateKeys.map(async (dateKey) => {
+                        try {
+                            const funciones = await getShowtimesByDate(dateKey);
+                            return [dateKey, Array.isArray(funciones) ? funciones : []];
+                        } catch (err) {
+                            if (import.meta.env.DEV) {
+                                console.warn(
+                                    `[MenuPrincipal] No se pudieron cargar funciones para ${dateKey}`,
+                                    err
+                                );
+                            }
 
-                const catalogs = await Promise.all(
-                    cinemas.map(async (cinema) => {
-                        const funcionesByDayEntries = await Promise.all(
-                            Object.entries(dayKeys).map(async ([day, dateKey]) => {
-                                if (!dateKey) {
-                                    return [day, []];
-                                }
-
-                                try {
-                                    const response = await getShowtimesByDate(dateKey, { cinemaId: cinema.id });
-                                    const funcionesOrdenadas = Array.isArray(response)
-                                        ? response
-                                            .slice()
-                                            .sort((a, b) => {
-                                                const timeA = new Date(a.fecha_hora_inicio).getTime();
-                                                const timeB = new Date(b.fecha_hora_inicio).getTime();
-
-                                                if (!Number.isNaN(timeA) && !Number.isNaN(timeB) && timeA !== timeB) {
-                                                    return timeA - timeB;
-                                                }
-
-                                                return (Number(a.id_funcion) || 0) - (Number(b.id_funcion) || 0);
-                                            })
-                                        : [];
-
-                                    return [day, funcionesOrdenadas];
-                                } catch (err) {
-                                    if (import.meta.env.DEV) {
-                                        console.warn(
-                                            `[MenuPrincipal] No se pudieron cargar funciones para cine ${cinema.id} en ${dateKey}`,
-                                            err
-                                        );
-                                    }
-
-                                    return [day, []];
-                                }
-                            })
-                        );
-                        const funcionesByDay = Object.fromEntries(funcionesByDayEntries);
-
-                        return {
-                            cinema,
-                            funcionesByDay,
-                        };
+                            return [dateKey, []];
+                        }
                     })
                 );
+                const daysWithShowtimes = dayEntries
+                    .filter(([, funciones]) => funciones.length > 0)
+                    .map(([dateKey]) => dateKey);
 
                 if (!isMounted) return;
-                setShowtimeCatalog(catalogs);
+                setAvailableDays(daysWithShowtimes);
             } catch (err) {
                 if (!isMounted) return;
                 console.error('Error cargando filtros:', err);
                 setCinemasData([]);
-                setShowtimeCatalog([]);
+                setAvailableDays([]);
             } finally {
                 if (isMounted) {
                     setFiltersLoading(false);
@@ -221,6 +221,69 @@ export const MenuPrincipal = () => {
             isMounted = false;
         };
     }, []);
+
+    useEffect(() => {
+        let isMounted = true;
+
+        const loadSelectedDayShowtimes = async () => {
+            if (!selectedDay) {
+                setFilteredShowtimes([]);
+                setShowtimesFilterLoading(false);
+                setLoadedShowtimeFilterKey('');
+                return;
+            }
+
+            const showtimeFilterKey = `${selectedDay}|${selectedCinema}`;
+
+            try {
+                setShowtimesFilterLoading(true);
+                const funciones = await getShowtimesByDate(selectedDay, {
+                    cinemaId: selectedCinema === 'all' ? undefined : selectedCinema,
+                });
+
+                if (!isMounted) return;
+                setFilteredShowtimes(Array.isArray(funciones) ? funciones : []);
+                setLoadedShowtimeFilterKey(showtimeFilterKey);
+            } catch (err) {
+                if (!isMounted) return;
+                console.error('Error cargando funciones del filtro:', err);
+                setFilteredShowtimes([]);
+                setLoadedShowtimeFilterKey(showtimeFilterKey);
+            } finally {
+                if (isMounted) {
+                    setShowtimesFilterLoading(false);
+                }
+            }
+        };
+
+        loadSelectedDayShowtimes();
+
+        return () => {
+            isMounted = false;
+        };
+    }, [selectedCinema, selectedDay]);
+
+    const days = useMemo(() => {
+        return availableDays
+            .slice()
+            .sort()
+            .map((dateKey) => ({
+                value: dateKey,
+                label: formatDayLabel(dateKey),
+            }));
+    }, [availableDays]);
+
+    useEffect(() => {
+        if (filtersLoading || days.length === 0) return;
+
+        const todayKey = getOffsetDateKey(0);
+        const hasSelectedDay = days.some((day) => day.value === selectedDay);
+
+        if (hasSelectedDay) return;
+
+        const todayOption = days.find((day) => day.value === todayKey);
+        setSelectedDay(todayOption?.value || days[0].value);
+    }, [days, filtersLoading, selectedDay]);
 
     const renderStars = (rating) => {
         return (
@@ -240,7 +303,13 @@ export const MenuPrincipal = () => {
     };
 
     const irADetalle = (pelicula) => {
-        navigate(`/menuPrincipal/detallePelicula/${pelicula.id}`, { state: pelicula });
+        navigate(`/menuPrincipal/detallePelicula/${pelicula.id}`, {
+            state: {
+                ...pelicula,
+                selectedDateKey: selectedDay || defaultDay,
+                selectedDateLabel: days.find((day) => day.value === (selectedDay || defaultDay))?.label || '',
+            },
+        });
     };
 
     const genreOptions = useMemo(() => {
@@ -262,37 +331,27 @@ export const MenuPrincipal = () => {
     }, [peliculasData]);
 
     const filteredPeliculas = useMemo(() => {
-        const source = peliculasData;
-        const selectedDayKeys =
-            selectedDay === 'all'
-                ? ['hoy', 'manana', 'pasado']
-                : [selectedDay];
-        const matchingMovieIds = new Set();
+        const matchingMovieIds = new Set(
+            filteredShowtimes.map((funcion) => String(funcion.id_pelicula))
+        );
+        const shouldFilterByShowtimes = selectedDay && !filtersLoading;
 
-        showtimeCatalog.forEach((item) => {
-            if (selectedCinema !== 'all' && String(item.cinema?.id) !== String(selectedCinema)) {
-                return;
-            }
-
-            selectedDayKeys.forEach((dayKey) => {
-                (Array.isArray(item.funcionesByDay?.[dayKey]) ? item.funcionesByDay[dayKey] : []).forEach((funcion) => {
-                    matchingMovieIds.add(String(funcion.id_pelicula));
-                });
-            });
-        });
-
-        const result = source.filter((pelicula) => {
+        const result = peliculasData.filter((pelicula) => {
             const movieGenres = getMovieGenres(pelicula);
 
             if (selectedGenre !== 'all' && !movieGenres.includes(selectedGenre)) {
                 return false;
             }
 
+            if (!shouldFilterByShowtimes) {
+                return true;
+            }
+
             return matchingMovieIds.has(String(pelicula.id));
         });
 
         return result;
-    }, [peliculasData, selectedCinema, selectedDay, selectedGenre, showtimeCatalog]);
+    }, [filteredShowtimes, filtersLoading, peliculasData, selectedDay, selectedGenre]);
 
     const displayPeliculas = useMemo(
         () =>
@@ -301,10 +360,18 @@ export const MenuPrincipal = () => {
                 .sort((a, b) => (b.estreno ? 1 : 0) - (a.estreno ? 1 : 0)),
         [filteredPeliculas]
     );
-    const isCatalogLoading = loading || filtersLoading;
-    const hasActiveFilters = selectedCinema !== 'all' || selectedDay !== 'hoy' || selectedGenre !== 'all';
+    const currentShowtimeFilterKey = selectedDay ? `${selectedDay}|${selectedCinema}` : '';
+    const showtimesReadyForCurrentFilter = !selectedDay || loadedShowtimeFilterKey === currentShowtimeFilterKey;
+    const isCatalogLoading =
+        loading ||
+        filtersLoading ||
+        (days.length > 0 && !selectedDay) ||
+        showtimesFilterLoading ||
+        !showtimesReadyForCurrentFilter;
+    const defaultDay = days.find((day) => day.value === getOffsetDateKey(0))?.value || days[0]?.value || '';
+    const hasActiveFilters = selectedCinema !== 'all' || selectedDay !== defaultDay || selectedGenre !== 'all';
     const clearFilters = () => {
-        setSelectedDay('hoy');
+        setSelectedDay(defaultDay);
         setSelectedCinema('all');
         setSelectedGenre('all');
     };
@@ -324,7 +391,9 @@ export const MenuPrincipal = () => {
                     <h2 className="text-4xl font-bold text-white mb-8">Recomendaciones</h2>
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
                         {isCatalogLoading ? (
-                            <div className="col-span-full text-gray-300">Cargando películas...</div>
+                            movieSkeletons.slice(0, 3).map((item) => (
+                                <MovieCardSkeleton key={item} large />
+                            ))
                         ) : displayPeliculas.length === 0 ? (
                             <div className="col-span-full rounded-3xl border border-slate-700/50 bg-slate-800/30 p-6 text-slate-300">
                                 No hay peliculas con funciones disponibles en la fecha seleccionada.
@@ -399,7 +468,11 @@ export const MenuPrincipal = () => {
                                 value={selectedDay}
                                 onChange={(e) => setSelectedDay(e.target.value)}
                                 className="w-full rounded-2xl border border-slate-600 bg-slate-800 px-4 py-3 text-white outline-none transition-colors focus:border-red-500"
+                                disabled={filtersLoading || days.length === 0}
                             >
+                                {days.length === 0 && (
+                                    <option value="">Sin funciones disponibles</option>
+                                )}
                                 {days.map((day) => (
                                     <option key={day.value} value={day.value}>
                                         {day.label}
@@ -447,8 +520,10 @@ export const MenuPrincipal = () => {
                 <section>
                     <h2 className="text-4xl font-bold text-white mb-8">Cartelera</h2>
                     {isCatalogLoading ? (
-                        <div className="rounded-3xl border border-slate-700/50 bg-slate-800/30 p-6 text-slate-300">
-                            Cargando funciones de la BD...
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                            {movieSkeletons.map((item) => (
+                                <MovieCardSkeleton key={item} />
+                            ))}
                         </div>
                     ) : displayPeliculas.length === 0 ? (
                         <div className="rounded-3xl border border-slate-700/50 bg-slate-800/30 p-6 text-slate-300">

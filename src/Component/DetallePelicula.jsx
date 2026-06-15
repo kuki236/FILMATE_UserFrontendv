@@ -1,9 +1,9 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { AlertTriangle, ArrowLeft, ArrowRight, Armchair, Clock3, Clapperboard, Star, Play, X } from 'lucide-react';
+import { useState, useEffect, useRef } from 'react';
+import { AlertTriangle, ArrowLeft, ArrowRight, Clock3, Clapperboard, Star, Play, X } from 'lucide-react';
 import Header from './Header.jsx';
 import Footer from './Footer.jsx';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
-import { getCinemas, getMovieById, getSeatMap, getShowtimesByCinema } from './filmateApi';
+import { createSeatWebSocket, getMovieById, getSeatMap, getShowtimesByDate, normalizeSeat } from './filmateApi';
 
 const FALLBACK_MEDIA_IMAGE =
     "data:image/svg+xml;charset=UTF-8," +
@@ -65,12 +65,29 @@ const getOffsetDateKey = (offsetDays) => {
 
 const getShowtimeDateKey = (showtime) => {
     const value = getShowtimeDateTime(showtime);
+    const rawDate = String(value || '').match(/^(\d{4}-\d{2}-\d{2})/)?.[1];
+    if (rawDate) return rawDate;
+
     return value ? formatDateKey(new Date(value)) : '';
 };
 
-const formatShowtimeDateTime = (showtime) => {
+const formatShowtimeDateTime = (showtime, forcedDateKey = '') => {
     const value = getShowtimeDateTime(showtime);
-    return value ? new Date(value).toLocaleString('es-PE') : 'Horario por definir';
+    if (!value) return 'Horario por definir';
+
+    const dateKey = forcedDateKey || getShowtimeDateKey(showtime);
+    const timeMatch = String(value).match(/(\d{1,2}):(\d{2})/);
+    const timeText = timeMatch
+        ? `${timeMatch[1].padStart(2, '0')}:${timeMatch[2]}`
+        : new Date(value).toLocaleTimeString('es-PE', {
+            hour: '2-digit',
+            minute: '2-digit',
+        });
+
+    if (!dateKey) return timeText;
+
+    const [year, month, day] = dateKey.split('-');
+    return `${day}/${month}/${year}, ${timeText}`;
 };
 
 const formatShowtimeTime = (showtime) => {
@@ -84,6 +101,72 @@ const formatShowtimeTime = (showtime) => {
 };
 
 const getSeatNumber = (seat) => seat?.numero ?? seat?.columna ?? '';
+
+const parseSeatSocketSeats = (event) => {
+    const message = JSON.parse(event.data);
+    const data = message?.data || message;
+
+    return Array.isArray(data?.asientos)
+        ? data.asientos.map(normalizeSeat)
+        : [];
+};
+
+const keepAvailableSelectedSeats = (selectedSeats, nextSeats) =>
+    selectedSeats.filter((selectedSeat) =>
+        nextSeats.some(
+            (seat) =>
+                seat.id_asiento === selectedSeat.id_asiento &&
+                seat.estado === 'Disponible'
+        )
+    );
+
+const getCinemaByRoomId = (roomId) => {
+    const id = Number(roomId);
+    if (id >= 1 && id <= 5) return { id: 1, nombre: 'Filmate La Molina' };
+    if (id >= 6 && id <= 9) return { id: 2, nombre: 'Filmate Miraflores' };
+    if (id >= 10 && id <= 13) return { id: 3, nombre: 'Filmate San Isidro' };
+    if (id >= 14 && id <= 19) return { id: 4, nombre: 'Filmate Surco' };
+    return { id: `sala-${roomId || 'sin-sede'}`, nombre: 'Sede por definir' };
+};
+
+const SeatGlyph = ({
+    seatSize = 36,
+    seatNumber = '',
+    selected = false,
+    unavailable = false,
+    showNumber = true,
+}) => {
+    const c = selected
+        ? { sit: '#1D9E75', sitS: '#0F6E56', back: '#0F6E56', backS: '#085041', arms: '#085041', num: '#ffffff' }
+        : unavailable
+            ? { sit: '#ef4444', sitS: '#b91c1c', back: '#dc2626', backS: '#991b1b', arms: '#dc2626', num: '#ffffff' }
+            : { sit: '#e8e7e2', sitS: '#c8c7c0', back: '#d0cfca', backS: '#b8b7b0', arms: '#c4c3bd', num: '#444441' };
+
+    const h = Math.round(seatSize * 1.11);
+
+    return (
+        <svg width={seatSize} height={h} viewBox="0 0 36 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <rect x="1" y="3" width="4" height="18" rx="2" fill={c.arms} />
+            <rect x="31" y="3" width="4" height="18" rx="2" fill={c.arms} />
+            <rect x="6" y="1" width="24" height="24" rx="7" fill={c.sit} stroke={c.sitS} strokeWidth="1.2" />
+            <rect x="4" y="28" width="28" height="10" rx="4" fill={c.back} stroke={c.backS} strokeWidth="1" />
+            {showNumber && (
+                <text x="18" y="17" textAnchor="middle" fontSize="10" fontWeight="700" fill={c.num} fontFamily="sans-serif">
+                    {seatNumber}
+                </text>
+            )}
+            {selected && (
+                <rect x="1" y="1" width="34" height="38" rx="8" fill="none" stroke="#5DCAA5" strokeWidth="2" />
+            )}
+            {unavailable && (
+                <>
+                    <line x1="11" y1="6" x2="25" y2="20" stroke="white" strokeWidth="1.5" strokeLinecap="round" opacity="0.5" />
+                    <line x1="25" y1="6" x2="11" y2="20" stroke="white" strokeWidth="1.5" strokeLinecap="round" opacity="0.5" />
+                </>
+            )}
+        </svg>
+    );
+};
 
 export const DetallePelicula = () => {
     const { movieId } = useParams();
@@ -102,7 +185,6 @@ export const DetallePelicula = () => {
     const [movieDetails, setMovieDetails] = useState(null);
     const [movieLoading, setMovieLoading] = useState(Boolean(movieId));
     const [movieError, setMovieError] = useState('');
-    const [selectedShowtimeDay, setSelectedShowtimeDay] = useState('hoy');
     const location = useLocation();
     const navigate = useNavigate();
     const seatMapScrollRef = useRef(null);
@@ -114,7 +196,14 @@ export const DetallePelicula = () => {
     const returnSeatSelection =
         location.state?.returnToSeatSelection ||
         (location.state?.selectedShow ? location.state : null);
-    const seatPrice = 22.5;
+    const selectedShowtimeDateKey =
+        returnSeatSelection?.selectedDateKey ||
+        location.state?.selectedDateKey ||
+        getOffsetDateKey(0);
+    const selectedShowtimeDateLabel =
+        returnSeatSelection?.selectedDateLabel ||
+        location.state?.selectedDateLabel ||
+        selectedShowtimeDateKey;
 
     useEffect(() => {
         window.scrollTo(0, 0);
@@ -173,30 +262,35 @@ export const DetallePelicula = () => {
                 setShowtimesLoading(true);
                 setShowtimesError('');
 
-                const cinemas = await getCinemas();
-                const catalogs = await Promise.all(
-                    cinemas.map(async (cinema) => {
-                        try {
-                            const response = await getShowtimesByCinema(cinema.id);
-                            const funciones = Array.isArray(response?.funciones)
-                                ? response.funciones
-                                    .filter((funcion) => Number(funcion.id_pelicula) === Number(pelicula.id))
-                                    .filter((funcion) => getShowtimeDateKey(funcion) === selectedShowtimeDateKey)
-                                    .sort((a, b) => new Date(getShowtimeDateTime(a)) - new Date(getShowtimeDateTime(b)))
-                                : [];
+                const funciones = await getShowtimesByDate(selectedShowtimeDateKey, {
+                    movieId: pelicula.id,
+                });
+                const funcionesOrdenadas = Array.isArray(funciones)
+                    ? funciones
+                        .filter((funcion) => getShowtimeDateKey(funcion) === selectedShowtimeDateKey)
+                        .sort((a, b) => new Date(getShowtimeDateTime(a)) - new Date(getShowtimeDateTime(b)))
+                    : [];
 
-                            return {
-                                cinema,
-                                funciones,
-                            };
-                        } catch {
-                            return {
-                                cinema,
-                                funciones: [],
-                            };
-                        }
-                    })
-                );
+                const funcionesByCinema = funcionesOrdenadas.reduce((acc, funcion) => {
+                    const cinema = funcion.nombre_cine
+                        ? { id: funcion.id_cine || funcion.nombre_cine, nombre: funcion.nombre_cine }
+                        : getCinemaByRoomId(funcion.id_sala);
+                    const cinemaKey = String(cinema.id);
+
+                    if (!acc[cinemaKey]) {
+                        acc[cinemaKey] = {
+                            cinema,
+                            funciones: [],
+                        };
+                    }
+
+                    acc[cinemaKey].funciones.push({
+                        ...funcion,
+                        nombre_sala: funcion.nombre_sala || funcion.sala || `Sala ${funcion.id_sala || ''}`.trim(),
+                    });
+                    return acc;
+                }, {});
+                const catalogs = Object.values(funcionesByCinema);
 
                 if (!isMounted) return;
 
@@ -223,13 +317,17 @@ export const DetallePelicula = () => {
     useEffect(() => {
         if (!returnSeatSelection) return;
 
-        if (returnSeatSelection.selectedShow) {
-            setSelectedShow(returnSeatSelection.selectedShow);
-        }
+        const timer = window.setTimeout(() => {
+            if (returnSeatSelection.selectedShow) {
+                setSelectedShow(returnSeatSelection.selectedShow);
+            }
 
-        if (Array.isArray(returnSeatSelection.selectedSeats)) {
-            setSelectedSeats(returnSeatSelection.selectedSeats);
-        }
+            if (Array.isArray(returnSeatSelection.selectedSeats)) {
+                setSelectedSeats(returnSeatSelection.selectedSeats);
+            }
+        }, 0);
+
+        return () => window.clearTimeout(timer);
     }, [returnSeatSelection]);
 
     useEffect(() => {
@@ -264,6 +362,39 @@ export const DetallePelicula = () => {
 
         return () => {
             isMounted = false;
+        };
+    }, [selectedShow?.id_funcion]);
+
+    useEffect(() => {
+        const functionId = selectedShow?.id_funcion;
+        if (!functionId) return undefined;
+
+        const socket = createSeatWebSocket(functionId);
+        if (!socket) return undefined;
+
+        const handleSeatSocketMessage = (event) => {
+            try {
+                const nextSeats = parseSeatSocketSeats(event);
+
+                if (!nextSeats.length) return;
+
+                setSeatMap(nextSeats);
+                loadedSeatMapFunctionIdRef.current = functionId;
+                setSeatMapError('');
+                setSelectedSeats((current) => keepAvailableSelectedSeats(current, nextSeats));
+            } catch (err) {
+                console.error('Error procesando websocket de asientos:', err);
+            }
+        };
+
+        socket.onmessage = handleSeatSocketMessage;
+
+        socket.onerror = () => {
+            console.warn('No se pudo mantener la sincronizacion en vivo de asientos.');
+        };
+
+        return () => {
+            socket.close();
         };
     }, [selectedShow?.id_funcion]);
 
@@ -390,45 +521,6 @@ export const DetallePelicula = () => {
         </div>
     );
 
-    const SeatGlyph = ({
-        seatSize = 36,
-        seatNumber = '',
-        selected = false,
-        unavailable = false,
-        showNumber = true,
-    }) => {
-        const c = selected
-            ? { sit: '#1D9E75', sitS: '#0F6E56', back: '#0F6E56', backS: '#085041', arms: '#085041', num: '#ffffff' }
-            : unavailable
-                ? { sit: '#ef4444', sitS: '#b91c1c', back: '#dc2626', backS: '#991b1b', arms: '#dc2626', num: '#ffffff' }
-                : { sit: '#e8e7e2', sitS: '#c8c7c0', back: '#d0cfca', backS: '#b8b7b0', arms: '#c4c3bd', num: '#444441' };
-
-        const h = Math.round(seatSize * 1.11);
-
-        return (
-            <svg width={seatSize} height={h} viewBox="0 0 36 40" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <rect x="1" y="3" width="4" height="18" rx="2" fill={c.arms} />
-                <rect x="31" y="3" width="4" height="18" rx="2" fill={c.arms} />
-                <rect x="6" y="1" width="24" height="24" rx="7" fill={c.sit} stroke={c.sitS} strokeWidth="1.2" />
-                <rect x="4" y="28" width="28" height="10" rx="4" fill={c.back} stroke={c.backS} strokeWidth="1" />
-                {showNumber && (
-                    <text x="18" y="17" textAnchor="middle" fontSize="10" fontWeight="700" fill={c.num} fontFamily="sans-serif">
-                        {seatNumber}
-                    </text>
-                )}
-                {selected && (
-                    <rect x="1" y="1" width="34" height="38" rx="8" fill="none" stroke="#5DCAA5" strokeWidth="2" />
-                )}
-                {unavailable && (
-                    <>
-                        <line x1="11" y1="6" x2="25" y2="20" stroke="white" strokeWidth="1.5" strokeLinecap="round" opacity="0.5" />
-                        <line x1="25" y1="6" x2="11" y2="20" stroke="white" strokeWidth="1.5" strokeLinecap="round" opacity="0.5" />
-                    </>
-                )}
-            </svg>
-        );
-    };
-
     const poster = pelicula.imagenPoster || pelicula.imagen || FALLBACK_MEDIA_IMAGE;
     const trailerImg = pelicula.imagenTrailer || pelicula.imagenPoster || pelicula.imagen || FALLBACK_MEDIA_IMAGE;
     const titulo = pelicula.titulo || 'Película';
@@ -437,9 +529,6 @@ export const DetallePelicula = () => {
         : pelicula.genero
             ? String(pelicula.genero).split(',').map((item) => item.trim()).filter(Boolean)
             : [];
-    const genero = generos.length ? generos.join(', ') : 'Género no disponible';
-    const duracion = pelicula.duracion || '';
-    const clasificacion = pelicula.clasificacion || '';
     const rating = pelicula.rating || 0;
     const sinopsis = pelicula.sinopsis || 'Sinopsis próxima a actualizar.';
     const directores = Array.isArray(pelicula.directores) && pelicula.directores.length
@@ -453,7 +542,6 @@ export const DetallePelicula = () => {
         : pelicula.reparto
             ? String(pelicula.reparto).split(',').map((item) => item.trim()).filter(Boolean)
             : [];
-    const reparto = actores.length ? actores.join(', ') : 'Por definir';
     const textoTrailer = pelicula.trailer || 'TRÁILER OFICIAL';
     const trailerUrl = pelicula.trailerUrl || '';
 
@@ -498,6 +586,7 @@ export const DetallePelicula = () => {
         setSelectedShow({
             cinema,
             ...showtime,
+            selectedShowtimeDateKey,
         });
         setSelectedSeats([]);
         setSeatMap([]);
@@ -512,6 +601,7 @@ export const DetallePelicula = () => {
             setSeatMapLoading(true);
             const response = await getSeatMap(showtime.id_funcion);
             setSeatMap(Array.isArray(response?.asientos) ? response.asientos : []);
+            loadedSeatMapFunctionIdRef.current = showtime.id_funcion;
         } catch (err) {
             console.error('Error cargando mapa de asientos:', err);
             setSeatMapError('No se pudo cargar el mapa de asientos real.');
@@ -532,13 +622,21 @@ export const DetallePelicula = () => {
     };
 
     const goToDulceria = () => {
+        if (getShowtimeDateKey(selectedShow) !== selectedShowtimeDateKey) {
+            setSeatMapError('La función seleccionada no corresponde a la fecha activa. Vuelve a elegir el horario.');
+            setSelectedShow(null);
+            setSelectedSeats([]);
+            return;
+        }
+
         navigate('/dulceria', {
             state: {
                 movieId: pelicula?.id ?? movieId,
                 pelicula: titulo,
                 poster,
                 sede: selectedShow?.cinema?.nombre_cine || selectedShow?.cinema?.nombre || selectedShow?.sede?.nombre,
-                horario: formatShowtimeDateTime(selectedShow),
+                horario: formatShowtimeDateTime(selectedShow, selectedShowtimeDateKey),
+                fecha_funcion: selectedShowtimeDateKey,
                 sala: selectedShow?.nombre_sala || selectedShow?.sala,
                 id_funcion: selectedShow?.id_funcion,
                 precio_base: Number(selectedShow?.precio_base || 0),
@@ -550,13 +648,16 @@ export const DetallePelicula = () => {
                     movieState: pelicula,
                     selectedShow,
                     selectedSeats,
+                    selectedDateKey: selectedShowtimeDateKey,
+                    selectedDateLabel: selectedShowtimeDateLabel,
                 },
             },
         });
     };
 
-    const selectedSeatLabels = selectedSeats.map((seat) => `${seat.fila}${seat.numero}`);
-    const selectedSeatsTotal = selectedSeats.length * seatPrice;
+    const selectedSeatLabels = selectedSeats.map((seat) => `${seat.fila}${getSeatNumber(seat)}`);
+    const selectedSeatPrice = Number(selectedShow?.precio_base || 0);
+    const selectedSeatsTotal = selectedSeats.length * selectedSeatPrice;
 
     const seatMapByRow = seatMap.reduce((acc, seat) => {
         if (!acc[seat.fila]) {
@@ -608,7 +709,7 @@ export const DetallePelicula = () => {
         );
     };
 
-    const SeatConfirmationModal = () => {
+    const renderSeatConfirmationModal = () => {
         if (!showSeatConfirm) return null;
 
         return (
@@ -669,7 +770,7 @@ export const DetallePelicula = () => {
         );
     };
 
-    const SeatSelector = () => {
+    const renderSeatSelector = () => {
         if (!selectedShow) return null;
 
         return (
@@ -733,7 +834,7 @@ export const DetallePelicula = () => {
                                             {selectedShow.cinema?.nombre_cine || selectedShow.cinema?.nombre || selectedShow.sede?.nombre || 'Sede por definir'}
                                         </p>
                                         <p className="mt-1 text-base font-semibold text-[#5fa6ff] sm:text-2xl">
-                                            {formatShowtimeDateTime(selectedShow)}
+                                            {formatShowtimeDateTime(selectedShow, selectedShow?.selectedShowtimeDateKey || selectedShowtimeDateKey)}
                                         </p>
                                     </div>
 
@@ -869,17 +970,16 @@ export const DetallePelicula = () => {
             <Header />
 
             {/* BOTÓN VOLVER*/}
-            <div className="flex justify-end mt-6 px-4 sm:px-6 lg:px-8">
+            <div className="fixed right-4 top-24 z-40 sm:right-8">
                 <button
                     onClick={() => navigate('/menuPrincipal')}
-                    className="px-6 py-2 bg-red-500 hover:bg-red-600 text-white font-bold rounded-full 
-                               transition-all duration-300 shadow-lg hover:scale-105"
+                    className="rounded-full bg-red-500 px-5 py-2.5 text-sm font-bold text-white shadow-lg shadow-red-950/40 transition-all duration-300 hover:scale-105 hover:bg-red-600 sm:px-6"
                 >
                     Volver a Cartelera
                 </button>
             </div>
 
-            <div className="flex-1 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12 w-full">
+            <div className="flex-1 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 w-full">
                 {movieError && (
                     <div className="mb-6 rounded-2xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-amber-100">
                         {movieError}
@@ -995,30 +1095,6 @@ export const DetallePelicula = () => {
 
                         {/* Horarios */}
                         <div className="space-y-4">
-                            <div className="flex flex-wrap gap-2">
-                                {showtimeDays.map((day) => {
-                                    const active = selectedShowtimeDay === day.value;
-
-                                    return (
-                                        <button
-                                            key={day.value}
-                                            type="button"
-                                            onClick={() => {
-                                                setSelectedShowtimeDay(day.value);
-                                                setSelectedShow(null);
-                                                setSelectedSeats([]);
-                                            }}
-                                            className={`rounded-full border px-4 py-2 text-sm font-semibold transition-colors ${
-                                                active
-                                                    ? 'border-red-400 bg-red-500 text-white'
-                                                    : 'border-slate-600 bg-slate-800 text-slate-200 hover:border-red-400 hover:bg-slate-700'
-                                            }`}
-                                        >
-                                            {day.label}
-                                        </button>
-                                    );
-                                })}
-                            </div>
                             {showtimesLoading ? (
                                 <div className="rounded-3xl border border-slate-700/50 bg-slate-800/30 p-6 text-slate-300">
                                     Cargando horarios reales...
@@ -1043,7 +1119,6 @@ export const DetallePelicula = () => {
                                     return (
                                     <div key={cinema.id} className="bg-gradient-to-r from-slate-700/30 to-slate-800/30 backdrop-blur-sm rounded-3xl p-6 border border-slate-700/50">
                                         <h3 className="text-white text-xl font-bold mb-2">{cinema.nombre}</h3>
-                                        <p className="mb-4 text-sm text-slate-300">{cinema.ciudad || 'Ciudad no disponible'}</p>
                                         <div className="flex flex-nowrap gap-3 overflow-x-auto pb-2">
                                             {funcionesOrdenadas.map((funcion) => (
                                                 <button
@@ -1195,43 +1270,6 @@ export const DetallePelicula = () => {
                     </div>
                 </div>
 
-                {/* Modal Trailer */}
-                {false && videoId && (
-                    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-sm p-4"
-                        onClick={() => setShowTrailer(false)}
-                    >
-                        <div
-                            className="relative w-full max-w-5xl aspect-video animate-scaleIn"
-                            onClick={(e) => e.stopPropagation()}
-                        >
-                            <button
-                                onClick={() => setShowTrailer(false)}
-                                className="absolute -top-12 right-0 text-white hover:text-red-500 transition-colors p-2 hover:bg-white/10 rounded-full z-10"
-                            >
-                                <X className="w-8 h-8" />
-                            </button>
-                            <iframe
-                                className="w-full h-full rounded-2xl shadow-2xl"
-                                src={`https://www.youtube.com/embed/${videoId}?autoplay=1`}
-                                title="YouTube video player"
-                                frameBorder="0"
-                                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                                allowFullScreen
-                            ></iframe>
-                            {trailerUrl && (
-                                <a
-                                    href={trailerUrl}
-                                    target="_blank"
-                                    rel="noreferrer"
-                                    className="absolute bottom-4 left-4 rounded-full bg-black/60 px-4 py-2 text-sm font-semibold text-white backdrop-blur-sm transition-colors hover:bg-black/80"
-                                >
-                                    Abrir en YouTube
-                                </a>
-                            )}
-                        </div>
-                    </div>
-                )}
-
                 {showSeatHelp && (
                     <div
                         className="fixed inset-0 z-[70] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4"
@@ -1338,9 +1376,9 @@ export const DetallePelicula = () => {
                 )}
             </div>
 
-            <SeatConfirmationModal />
+            {renderSeatConfirmationModal()}
 
-            {selectedShow && <SeatSelector />}
+            {selectedShow && renderSeatSelector()}
 
             <Footer />
 
@@ -1358,3 +1396,4 @@ export const DetallePelicula = () => {
 };
 
 export default DetallePelicula;
+

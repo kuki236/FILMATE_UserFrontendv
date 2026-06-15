@@ -2,6 +2,20 @@ const DEFAULT_API_URL = '/api';
 
 const API_BASE_URL = (import.meta.env.VITE_API_URL || DEFAULT_API_URL).replace(/\/$/, '');
 
+const getWsBaseUrl = () => {
+  const configured = import.meta.env.VITE_WS_URL;
+  if (configured) return configured.replace(/\/$/, '');
+
+  if (typeof window === 'undefined') return '';
+
+  const apiUrl = API_BASE_URL.startsWith('http')
+    ? API_BASE_URL
+    : `${window.location.origin}${API_BASE_URL.startsWith('/') ? '' : '/'}${API_BASE_URL}`;
+  const url = new URL(apiUrl);
+  url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+  return url.toString().replace(/\/$/, '');
+};
+
 const ERROR_TRANSLATIONS = {
   'Email already registered': 'Ya existe una cuenta con ese correo.',
   'Username already taken': 'Ya existe una cuenta con ese nombre de usuario.',
@@ -62,7 +76,31 @@ async function request(path, options = {}) {
   return response.json();
 }
 
+async function requestFirstAvailable(paths, options = {}) {
+  let lastError = null;
+
+  for (const path of paths) {
+    try {
+      return await request(path, options);
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  throw lastError || new Error('No se pudo completar la peticion.');
+}
+
 const asArray = (value) => (Array.isArray(value) ? value : []);
+
+const asPayloadArray = (value, keys = []) => {
+  if (Array.isArray(value)) return value;
+
+  for (const key of keys) {
+    if (Array.isArray(value?.[key])) return value[key];
+  }
+
+  return [];
+};
 
 const formatDuration = (minutes) => {
   if (!minutes && minutes !== 0) return 'Por definir';
@@ -109,6 +147,8 @@ const parseTextList = (value) => {
 };
 
 export function normalizeMovie(movie) {
+  if (!movie) return movie;
+
   const genresFromRelations = asArray(movie.generos)
     .map((relation) => {
       if (typeof relation === 'string') return relation;
@@ -130,8 +170,6 @@ export function normalizeMovie(movie) {
   const reparto = parseTextList(movie.reparto || movie.elenco).length
     ? parseTextList(movie.reparto || movie.elenco)
     : actorsFromRelations;
-  const estadoPelicula = movie.estado_pelicula || movie.categoria_cartelera || movie.estado_registro || '';
-
   const directorsFromRelations = Array.isArray(movie.directores)
     ? movie.directores
         .map((relation) => relation?.director?.nombre || relation?.nombre || relation?.director_nombre || '')
@@ -150,7 +188,7 @@ export function normalizeMovie(movie) {
     'Por definir';
 
   return {
-    id: movie.id_pelicula,
+    id: movie.id_pelicula || movie.id,
     titulo: movie.titulo,
     genero: movie.genero || generos.join(', ') || 'Cartelera',
     duracion: formatDuration(movie.duracion_minutos),
@@ -174,6 +212,8 @@ export function normalizeMovie(movie) {
 }
 
 export function normalizeCinema(cinema) {
+  if (!cinema) return cinema;
+
   return {
     id: cinema.id_cine,
     nombre: cinema.nombre_cine || cinema.nombre,
@@ -186,7 +226,7 @@ export function normalizeCinema(cinema) {
 }
 
 export function normalizeShowtime(showtime) {
-  const fechaHora = showtime.fecha_hora_inicio || showtime.fecha_hora || showtime.horario || '';
+  const fechaHora = showtime.fecha_hora || showtime.fecha_hora_inicio || showtime.horario || '';
   const precioBase = Number(showtime.precio_base ?? showtime.precio ?? 0);
 
   return {
@@ -199,12 +239,16 @@ export function normalizeShowtime(showtime) {
 }
 
 export function normalizeSeat(seat) {
+  if (!seat) return seat;
+
   const numero = seat.numero ?? seat.columna;
+  const estado = seat.estado || seat.estado_asiento || 'Disponible';
 
   return {
     ...seat,
     numero,
     columna: seat.columna ?? numero,
+    estado,
   };
 }
 
@@ -260,23 +304,97 @@ export function normalizeSnackProduct(product, categoriesById = {}) {
   };
 }
 
-export async function getMovies() {
-  const data = await request('/movies/');
+export function normalizeSocialSummary(summary) {
+  const profile = normalizeUser(summary?.usuario || summary?.profile || summary?.user || null);
+  const stats = summary?.stats || {};
+
+  return {
+    profile,
+    stats: {
+      totalMovies: Number(
+        stats.total_movies ??
+          stats.total_peliculas ??
+          stats.peliculas ??
+          stats.total_reviews ??
+          stats.reviews ??
+          0
+      ),
+      totalReviews: Number(stats.total_reviews ?? stats.reviews ?? 0),
+      followers: Number(stats.followers ?? stats.seguidores ?? 0),
+      following: Number(stats.following ?? stats.siguiendo ?? 0),
+    },
+    favoriteMovies: asPayloadArray(
+      summary?.top_favorites ||
+        summary?.favoriteMovies ||
+        summary?.favoritos ||
+        summary?.favorites,
+      ['results', 'movies', 'peliculas', 'items']
+    ).map(normalizeMovie),
+  };
+}
+
+export function normalizeRatingDistribution(data) {
+  const distribution = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
+
+  if (Array.isArray(data)) {
+    data.forEach((item) => {
+      const rating = Number(item.rating ?? item.calificacion ?? item.puntuacion_estrellas ?? item.estrellas);
+      const total = Number(item.total ?? item.count ?? item.cantidad ?? 0);
+      if (rating >= 1 && rating <= 5) distribution[rating] = total;
+    });
+    return distribution;
+  }
+
+  if (data && typeof data === 'object') {
+    [1, 2, 3, 4, 5].forEach((rating) => {
+      distribution[rating] = Number(data[rating] ?? data[String(rating)] ?? 0);
+    });
+  }
+
+  return distribution;
+}
+
+export function normalizeRatedMovie(item) {
+  return {
+    rating: Number(item?.calificacion ?? item?.rating ?? item?.puntuacion_estrellas ?? 0),
+    movie: normalizeMovie(item?.pelicula || item?.movie || item),
+  };
+}
+
+export async function getMovies({ skip = 0, limit = 50, generoId } = {}) {
+  const query = new URLSearchParams();
+  query.set('skip', String(skip));
+  query.set('limit', String(limit));
+
+  if (generoId !== undefined && generoId !== null && generoId !== '') {
+    query.set('genero_id', String(generoId));
+  }
+
+  const data = await request(`/client/movies/?${query.toString()}`);
   return Array.isArray(data) ? data.map(normalizeMovie) : [];
 }
 
+export async function searchMovies(query) {
+  const normalizedQuery = query?.trim();
+  if (!normalizedQuery) return [];
+
+  const params = new URLSearchParams({ q: normalizedQuery });
+  const data = await request(`/client/movies/search?${params.toString()}`);
+  return asPayloadArray(data, ['results', 'movies', 'peliculas', 'items']).map(normalizeMovie);
+}
+
 export async function getMovieById(movieId) {
-  const data = await request(`/movies/${movieId}/details`);
+  const data = await request(`/client/movies/${movieId}/details`);
   return normalizeMovie(data);
 }
 
 export async function getCinemas() {
-  const data = await request('/cinemas/');
+  const data = await request('/client/cinemas/');
   return Array.isArray(data) ? data.map(normalizeCinema) : [];
 }
 
 export async function getCinemaById(cinemaId) {
-  const data = await request(`/cinemas/${cinemaId}`);
+  const data = await request(`/client/cinemas/${cinemaId}`);
   return normalizeCinema(data);
 }
 
@@ -306,7 +424,7 @@ const extractShowtimeList = (data) => {
 };
 
 export async function getShowtimesByCinema(cinemaId) {
-  const data = await request(`/showtimes/cinema/${cinemaId}`);
+  const data = await request(`/client/showtimes/cinema/${cinemaId}`);
   const funciones = extractShowtimeList(data).map(normalizeShowtime);
 
   if (data && typeof data === 'object' && !Array.isArray(data)) {
@@ -331,13 +449,13 @@ export async function getShowtimesByDate(targetDate, { cinemaId, movieId } = {})
   }
 
   const queryString = query.toString();
-  const data = await request(`/showtimes/date/${targetDate}${queryString ? `?${queryString}` : ''}`);
+  const data = await request(`/client/showtimes/date/${targetDate}${queryString ? `?${queryString}` : ''}`);
   const funciones = Array.isArray(data) ? data : extractShowtimeList(data);
   return funciones.map(normalizeShowtime);
 }
 
 export async function getSeatMap(showtimeId) {
-  const data = await request(`/seats/showtime/${showtimeId}`);
+  const data = await request(`/client/seats/showtime/${showtimeId}`);
   return {
     ...data,
     asientos: asArray(data?.asientos).map(normalizeSeat),
@@ -345,7 +463,7 @@ export async function getSeatMap(showtimeId) {
 }
 
 export async function lockSeats(showtimeId, seatIds) {
-  return request('/seats/lock', {
+  return request('/client/seats/lock', {
     method: 'POST',
     body: JSON.stringify({
       id_funcion: showtimeId,
@@ -358,7 +476,7 @@ export async function checkoutOrder(payload) {
   const idsAsientos = payload.ids_asientos || payload.asientos || [];
   const snacks = payload.snacks || payload.confiteria || [];
 
-  return request('/orders/checkout', {
+  return request('/client/orders/checkout', {
     method: 'POST',
     body: JSON.stringify({
       id_usuario: payload.id_usuario,
@@ -404,20 +522,171 @@ export async function loginUser(payload) {
   };
 }
 
+export async function getUserProfile(userId) {
+  if (!userId) return null;
+  const data = await request(`/users/${userId}`);
+  return normalizeUser(data);
+}
+
+export async function getSocialSummary(userId) {
+  if (!userId) {
+    return {
+      profile: null,
+      stats: { totalMovies: 0, totalReviews: 0, followers: 0, following: 0 },
+      favoriteMovies: [],
+    };
+  }
+
+  const data = await requestFirstAvailable([
+    `/client/social/summary/${userId}`,
+    `/client/actividad/summary/${userId}`,
+  ]);
+
+  return normalizeSocialSummary(data);
+}
+
+export async function updateSocialProfile(userId, payload) {
+  if (!userId) return null;
+
+  const data = await requestFirstAvailable(
+    [
+      `/client/social/profile/${userId}`,
+      `/client/actividad/profile/${userId}`,
+    ],
+    {
+      method: 'PUT',
+      body: JSON.stringify({
+        bio: payload.bio || payload.descripcion || payload.presentacion || '',
+      }),
+    }
+  );
+
+  return {
+    ...data,
+    bio: data?.bio ?? payload.bio ?? '',
+  };
+}
+
+export async function updateUserProfile(userId, payload) {
+  if (!userId) return null;
+
+  const data = await request(`/users/${userId}`, {
+    method: 'PUT',
+    body: JSON.stringify({
+      nombre: payload.nombre,
+      username: payload.username || payload.nombreUsuario || payload.nombre_usuario,
+      correo: payload.correo || payload.correo_electronico,
+      telefono: payload.telefono || null,
+      url_perfil: payload.url_perfil || null,
+    }),
+  });
+
+  return normalizeUser(data);
+}
+
+export async function getFavoriteMovies(userId) {
+  if (!userId) return [];
+  const data = await requestFirstAvailable([
+    `/client/users/${userId}/favorite-movies`,
+    `/client/movies/favorites/${userId}`,
+  ]);
+  return asPayloadArray(data, ['results', 'movies', 'peliculas', 'items']).map(normalizeMovie);
+}
+
+export async function updateFavoriteMovies(userId, movieIds) {
+  if (!userId) return null;
+
+  return requestFirstAvailable(
+    [
+      `/client/users/${userId}/favorite-movies`,
+      `/client/interacciones/usuario/${userId}/favorite-movies`,
+    ],
+    {
+      method: 'PUT',
+      body: JSON.stringify({
+        movie_ids: asArray(movieIds).slice(0, 5),
+      }),
+    }
+  );
+}
+
+export async function searchUsers(query) {
+  const normalizedQuery = query?.trim();
+  if (!normalizedQuery) return [];
+
+  const params = new URLSearchParams({ q: normalizedQuery });
+  const data = await requestFirstAvailable([
+    `/client/users/search?${params.toString()}`,
+    `/users/search?${params.toString()}`,
+  ]);
+
+  return asPayloadArray(data, ['results', 'users', 'usuarios', 'items']).map(normalizeUser);
+}
+
+export async function getUserRatingDistribution(userId) {
+  if (!userId) return normalizeRatingDistribution(null);
+  const data = await request(`/client/reviews/user/${userId}/rating-distribution`);
+  return normalizeRatingDistribution(data);
+}
+
+export async function getUserRatedMovies(userId) {
+  if (!userId) return [];
+  const data = await request(`/client/reviews/user/${userId}/movies`);
+  return asPayloadArray(data, ['results', 'movies', 'peliculas', 'items']).map(normalizeRatedMovie);
+}
+
+export async function getUserInteractions(userId) {
+  if (!userId) return [];
+  const data = await request(`/client/interacciones/usuario/${userId}`);
+  return asArray(data);
+}
+
+export async function updateMovieInteraction(payload) {
+  return request('/client/interacciones/', {
+    method: 'POST',
+    body: JSON.stringify({
+      id_usuario: payload.id_usuario,
+      id_pelicula: payload.id_pelicula,
+      vista: Boolean(payload.vista),
+      favorita: Boolean(payload.favorita),
+      en_lista_seguimiento: Boolean(payload.en_lista_seguimiento),
+    }),
+  });
+}
+
+export async function getFollowers(userId) {
+  if (!userId) return [];
+  const data = await request(`/client/seguidores/${userId}/seguidores`);
+  return asArray(data);
+}
+
+export async function getFollowing(userId) {
+  if (!userId) return [];
+  const data = await request(`/client/seguidores/${userId}/siguiendo`);
+  return asArray(data);
+}
+
 export async function getSnackCategories() {
-  const data = await request('/snacks/categories');
+  const data = await request('/client/snacks/categories');
   return asArray(data).map(normalizeSnackCategory);
 }
 
 export async function getSnackProducts() {
   const categories = await getSnackCategories();
   const categoriesById = Object.fromEntries(categories.map((category) => [category.id, category]));
-  const data = await request('/snacks/products');
+  const data = await request('/client/snacks/products');
 
   return {
     categories,
     products: asArray(data).map((product) => normalizeSnackProduct(product, categoriesById)),
   };
+}
+
+export function createSeatWebSocket(showtimeId) {
+  const wsBaseUrl = getWsBaseUrl();
+  if (!wsBaseUrl || !showtimeId) return null;
+
+  return new WebSocket(`${wsBaseUrl}/ws/seats/${showtimeId}`);
 }
 
 export { API_BASE_URL };

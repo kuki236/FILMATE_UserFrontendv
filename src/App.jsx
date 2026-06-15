@@ -6,6 +6,7 @@ import Registro from './Component/Registro.jsx';
 import Cines from './Component/Cines.jsx';
 import Dulceria from './Component/Dulceria.jsx';
 import Social from './Component/Social.jsx';
+import SocialEditarPerfil from './Component/SocialEditarPerfil.jsx';
 import DetallePelicula from './Component/DetallePelicula.jsx';
 import ProtectedRoute from './Component/ProtectedRoute.jsx';
 
@@ -23,6 +24,14 @@ function App() {
           element={
             <ProtectedRoute requireRegistered>
               <Social />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/social/editarPerfil"
+          element={
+            <ProtectedRoute requireRegistered>
+              <SocialEditarPerfil />
             </ProtectedRoute>
           }
         />

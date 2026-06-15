@@ -8,52 +8,11 @@ import jsPDF from 'jspdf';
 import { checkoutOrder, getSnackProducts } from './filmateApi';
 import { getAuthSession } from './authSession';
 
-const FALLBACK_IMAGE = 'https://placehold.co/400x400/0f172a/f8fafc?text=Filmate';
-
 const productosData = {
-  combos: [
-    {
-      id: 1,
-      nombre: 'Combo Pareja',
-      descripcion: '1 cancha gigante + 2 gaseosas medianas.',
-      precio: 35,
-      imagen: 'https://images.pexels.com/photos/7603978/pexels-photo-7603978.jpeg',
-    },
-    {
-      id: 2,
-      nombre: 'Combo Familiar',
-      descripcion: '2 canchas gigantes + 4 gaseosas medianas + 2 nachos.',
-      precio: 65,
-      imagen: 'https://images.pexels.com/photos/10397068/pexels-photo-10397068.jpeg',
-    },
-  ],
-  popcorn: [
-    {
-      id: 3,
-      nombre: 'Popcorn Grande',
-      descripcion: 'Cancha dulce grande.',
-      precio: 18,
-      imagen: 'https://images.pexels.com/photos/10353949/pexels-photo-10353949.jpeg',
-    },
-  ],
-  bebidas: [
-    {
-      id: 4,
-      nombre: 'Gaseosa Grande 32oz',
-      descripcion: 'Bebida fria grande.',
-      precio: 12,
-      imagen: 'https://images.pexels.com/photos/9459202/pexels-photo-9459202.jpeg',
-    },
-  ],
-  dulces: [
-    {
-      id: 5,
-      nombre: 'M&M Compartir',
-      descripcion: 'Bolsa grande de chocolates.',
-      precio: 12,
-      imagen: 'https://placehold.co/800x800/0f172a/f8fafc?text=Dulces',
-    },
-  ],
+  combos: [],
+  popcorn: [],
+  bebidas: [],
+  dulces: [],
 };
 
 const categoryLabels = {
@@ -89,6 +48,15 @@ const paymentOptions = [
     icon: Banknote,
   },
 ];
+
+const getCategoryScrollState = (container) => {
+  const maxScrollLeft = Math.max(0, container.scrollWidth - container.clientWidth);
+
+  return {
+    atStart: container.scrollLeft <= 64,
+    atEnd: container.scrollLeft >= maxScrollLeft - 64,
+  };
+};
 
 function TicketContent({ carrito, total, pedidoNumber, fechaCompra, bookingContext, transactionId, qrValue }) {
   return (
@@ -186,15 +154,385 @@ function TicketContent({ carrito, total, pedidoNumber, fechaCompra, bookingConte
   );
 }
 
+const checkoutViews = {
+  cart: 'cart',
+  verification: 'verification',
+  payment: 'payment',
+  success: 'success',
+};
+
+function VerificationModal({
+  carrito,
+  snacksTotal,
+  reservationTotal,
+  total,
+  isSeatFlow,
+  onUpdateQuantity,
+  onRequestExit,
+  onPay,
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/70 p-3 sm:items-center sm:p-4">
+      <div className="w-full max-w-[95vw] overflow-hidden rounded-2xl border border-slate-700 bg-slate-900 shadow-2xl sm:max-w-md">
+        <div className="flex items-center justify-between border-b border-slate-700 px-4 py-4 sm:px-6">
+          <h2 className="text-lg font-bold text-white sm:text-xl">Verifica tu compra</h2>
+          <button
+            onClick={() => onRequestExit('dulceria')}
+            className="text-slate-400 transition-colors hover:text-white"
+          >
+            <X className="h-6 w-6" />
+          </button>
+        </div>
+
+        <div className="max-h-[85vh] overflow-y-auto px-4 py-5 sm:px-6">
+          <p className="mb-4 text-sm text-slate-300">
+            Tu pedido de confiteria sera preparado con estos productos.
+          </p>
+
+          <div className="mb-6 space-y-3 border-y border-slate-700 py-4">
+            {carrito.map((item) => (
+              <div key={item.id} className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="font-semibold text-white">{item.nombre}</p>
+                  <p className="text-sm text-slate-400">
+                    {item.cantidad} x S/. {item.precio.toFixed(2)}
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => onUpdateQuantity(item.id, item.cantidad - 1)}
+                    className="flex h-7 w-7 items-center justify-center rounded-full bg-yellow-400 text-black transition-colors hover:bg-yellow-500"
+                  >
+                    <Minus className="h-3 w-3" />
+                  </button>
+                  <span className="w-5 text-center text-white">{item.cantidad}</span>
+                  <button
+                    onClick={() => onUpdateQuantity(item.id, item.cantidad + 1)}
+                    className="flex h-7 w-7 items-center justify-center rounded-full bg-yellow-400 text-black transition-colors hover:bg-yellow-500"
+                  >
+                    <Plus className="h-3 w-3" />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="mb-6 rounded-xl bg-slate-800 p-4">
+            <div className="flex items-center justify-between text-slate-300">
+              <span>Subtotal snacks</span>
+              <span>S/. {snacksTotal.toFixed(2)}</span>
+            </div>
+            {isSeatFlow && (
+              <div className="mt-2 flex items-center justify-between text-slate-300">
+                <span>Subtotal asientos</span>
+                <span>S/. {reservationTotal.toFixed(2)}</span>
+              </div>
+            )}
+            <div className="mt-2 flex items-center justify-between border-t border-slate-700 pt-2 text-lg font-bold text-white">
+              <span>Total</span>
+              <span>S/. {total.toFixed(2)}</span>
+            </div>
+          </div>
+
+          <div className="flex gap-3">
+            <button
+              onClick={() => onRequestExit('dulceria')}
+              className="flex-1 rounded-lg bg-slate-700 py-2 font-semibold text-white transition-colors hover:bg-slate-600"
+            >
+              Cancelar pedido
+            </button>
+            <button
+              onClick={onPay}
+              className="flex-1 rounded-lg bg-red-600 py-2 font-semibold text-white transition-colors hover:bg-red-700"
+            >
+              Pagar ahora
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PaymentModal({
+  paymentTotal,
+  isSeatFlow,
+  seatsCount,
+  reservationTotal,
+  skipSnacksForReservation,
+  checkoutError,
+  bookingContext,
+  selectedPaymentMethod,
+  selectedPayment,
+  isProcessingPayment,
+  onSelectPaymentMethod,
+  onRequestExit,
+  onConfirmPayment,
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/70 p-3 sm:items-center sm:p-4">
+      <div className="flex max-h-[92vh] w-full max-w-[95vw] flex-col overflow-y-auto rounded-2xl border border-slate-700 bg-slate-900 shadow-2xl sm:max-w-md">
+        <div className="shrink-0 flex items-center justify-between border-b border-slate-700 px-4 py-4 sm:px-6">
+          <h2 className="text-lg font-bold text-white sm:text-xl">Pago</h2>
+          <button
+            onClick={() => onRequestExit('verification')}
+            className="text-slate-400 transition-colors hover:text-white"
+          >
+            <X className="h-6 w-6" />
+          </button>
+        </div>
+
+        <div className="px-4 py-5 sm:px-6">
+          <div className="mb-4 rounded-xl border border-blue-500/30 bg-blue-500/10 p-4">
+            <p className="text-sm text-slate-300">Total a cobrar</p>
+            <p className="text-3xl font-bold text-white">S/. {paymentTotal.toFixed(2)}</p>
+            {isSeatFlow && (
+              <p className="mt-2 text-sm text-slate-200">
+                Asientos: {seatsCount} Â· Subtotal asientos: S/. {reservationTotal.toFixed(2)}
+              </p>
+            )}
+            {isSeatFlow && skipSnacksForReservation && (
+              <p className="mt-2 text-sm font-semibold text-emerald-300">
+                Snacks omitidos: no se cobrarÃ¡n en esta compra.
+              </p>
+            )}
+          </div>
+
+          {checkoutError && (
+            <div className="mb-4 rounded-xl border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-100">
+              {checkoutError}
+            </div>
+          )}
+
+          {bookingContext && (
+            <div className="mb-4 rounded-xl border border-slate-700 bg-slate-800 p-4">
+              <p className="text-xs uppercase tracking-[0.25em] text-slate-400">PelÃ­cula y asientos</p>
+              <p className="mt-2 text-lg font-bold text-white">{bookingContext.pelicula}</p>
+              <p className="mt-1 text-sm text-slate-300">
+                {bookingContext.sede} Â· {bookingContext.horario} Â· {bookingContext.sala}
+              </p>
+              <p className="mt-2 text-sm text-slate-300">
+                {bookingContext.asientos?.length ? bookingContext.asientos.join(', ') : 'Sin asientos'}
+              </p>
+            </div>
+          )}
+
+          <div className="mb-6 grid grid-cols-1 gap-3 sm:grid-cols-2">
+            {paymentOptions.map((option) => {
+              const Icon = option.icon;
+              const active = selectedPaymentMethod === option.id;
+
+              return (
+                <button
+                  key={option.id}
+                  onClick={() => onSelectPaymentMethod(option.id)}
+                  className={`rounded-2xl border p-4 text-left transition-all ${
+                    active
+                      ? 'border-blue-400 bg-blue-500/10 ring-2 ring-blue-400/40'
+                      : 'border-slate-700 bg-slate-800 hover:border-slate-500 hover:bg-slate-700'
+                  }`}
+                >
+                  <div className="mb-2 flex items-center gap-3">
+                    <div
+                      className={`flex h-10 w-10 items-center justify-center rounded-full ${
+                        active ? 'bg-blue-500/20 text-blue-300' : 'bg-slate-700 text-slate-200'
+                      }`}
+                    >
+                      <Icon className="h-5 w-5" />
+                    </div>
+                    <div>
+                      <p className="font-semibold text-white">{option.label}</p>
+                      <p className="text-xs text-slate-400">{option.description}</p>
+                    </div>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="mb-6 rounded-xl bg-slate-800 p-4">
+            <div className="mb-3 flex items-center justify-between text-sm text-slate-300">
+              <span>MÃ©todo seleccionado</span>
+              <span className="text-blue-300">{selectedPayment?.label}</span>
+            </div>
+            <div className="mb-3 flex items-center justify-between text-sm text-slate-300">
+              <span>Estado</span>
+              <span className={isProcessingPayment ? 'text-yellow-300' : 'text-emerald-300'}>
+                {isProcessingPayment ? 'Procesando...' : 'Listo para pagar'}
+              </span>
+            </div>
+            <div className="h-2 overflow-hidden rounded-full bg-slate-700">
+              <div
+                className={`h-full rounded-full bg-gradient-to-r from-blue-500 to-emerald-400 transition-all duration-500 ${
+                  isProcessingPayment ? 'w-[85%] animate-pulse' : 'w-[30%]'
+                }`}
+              />
+            </div>
+          </div>
+
+          <div className="mt-6 flex gap-3 pb-1">
+            <button
+              onClick={() => onRequestExit('verification')}
+              className="flex-1 rounded-lg bg-slate-700 py-2 font-semibold text-white transition-colors hover:bg-slate-600"
+            >
+              Cancelar
+            </button>
+            <button
+              onClick={onConfirmPayment}
+              disabled={isProcessingPayment}
+              className="flex-1 rounded-lg bg-emerald-600 py-2 font-semibold text-white transition-colors hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-emerald-800"
+            >
+              {isProcessingPayment ? 'Pagando...' : `Pagar con ${selectedPayment?.label || 'mÃ©todo'}`}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ExitConfirmDialog({ pendingExitAction, onClose, onConfirm }) {
+  const isPaymentExit = pendingExitAction === 'verification';
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-end justify-center bg-black/80 p-3 sm:items-center sm:p-4">
+      <div className="w-full max-w-[95vw] overflow-hidden rounded-3xl border border-slate-700 bg-slate-800 shadow-2xl sm:max-w-md">
+        <div className="flex items-center gap-4 border-b border-slate-700 px-4 py-4 sm:px-6">
+          <div className="flex h-12 w-12 items-center justify-center rounded-full bg-yellow-500/15 text-yellow-300">
+            <AlertTriangle className="h-6 w-6" />
+          </div>
+          <div>
+            <h2 className="text-lg font-bold text-white sm:text-xl">
+              {isPaymentExit ? 'Â¿Cancelar el pago?' : 'Â¿Seguro que quieres salir?'}
+            </h2>
+            <p className="text-sm text-slate-400">
+              {isPaymentExit
+                ? 'VolverÃ¡s a la verificaciÃ³n del pedido.'
+                : 'Tu pedido se mantendrÃ¡ guardado mientras sigas en esta sesiÃ³n.'}
+            </p>
+          </div>
+        </div>
+
+        <div className="px-4 py-5 sm:px-6">
+          <p className="mb-6 text-sm leading-relaxed text-slate-300">
+            {isPaymentExit
+              ? 'Si cancelas, regresarÃ¡s al resumen de tu compra para revisar o cambiar tus productos.'
+              : 'Si sales ahora, volverÃ¡s a la dulcerÃ­a y no perderÃ¡s lo que ya llevas en el carrito.'}
+          </p>
+
+          <div className="flex gap-3">
+            <button
+              onClick={onClose}
+              className="flex-1 rounded-lg bg-slate-700 py-2 font-semibold text-white transition-colors hover:bg-slate-600"
+            >
+              No, volver
+            </button>
+            <button
+              onClick={onConfirm}
+              className="flex-1 rounded-lg bg-yellow-500 py-2 font-semibold text-slate-950 transition-colors hover:bg-yellow-400"
+            >
+              {isPaymentExit ? 'SÃ­, volver' : 'SÃ­, salir'}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function NoticeDialog({ notice, onClose }) {
+  return (
+    <div className="fixed inset-0 z-[70] flex items-end justify-center bg-black/80 p-3 sm:items-center sm:p-4">
+      <div className="w-full max-w-[95vw] overflow-hidden rounded-3xl border border-slate-700 bg-slate-800 shadow-2xl sm:max-w-md">
+        <div className="flex items-center gap-4 border-b border-slate-700 px-4 py-4 sm:px-6">
+          <div className="flex h-12 w-12 items-center justify-center rounded-full bg-red-500/15 text-red-300">
+            <AlertTriangle className="h-6 w-6" />
+          </div>
+          <div>
+            <h2 className="text-lg font-bold text-white sm:text-xl">{notice.title}</h2>
+            <p className="text-sm text-slate-400">Revisa el mensaje antes de continuar.</p>
+          </div>
+        </div>
+
+        <div className="px-4 py-5 sm:px-6">
+          <p className="mb-6 text-sm leading-relaxed text-slate-300">{notice.message}</p>
+          <button
+            onClick={onClose}
+            className="w-full rounded-lg bg-blue-600 py-2 font-semibold text-white transition-colors hover:bg-blue-700"
+          >
+            Entendido
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SuccessModal({
+  ticketRef,
+  receiptCart,
+  receiptTotal,
+  pedidoNumber,
+  fechaCompra,
+  bookingContext,
+  transactionId,
+  qrValue,
+  isSeatFlow,
+  isGeneratingPDF,
+  onClose,
+  onDownload,
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/70 p-3 sm:items-center sm:p-4">
+      <div className="relative w-full max-w-[95vw] overflow-hidden rounded-2xl border border-slate-700 bg-slate-900 shadow-2xl sm:max-w-2xl">
+        <button
+          onClick={onClose}
+          className="absolute left-4 top-4 text-slate-400 transition-colors hover:text-white"
+        >
+          <ArrowLeft className="h-6 w-6" />
+        </button>
+
+        <div className="max-h-[92vh] overflow-y-auto p-4 sm:p-6">
+          <div ref={ticketRef}>
+            <TicketContent
+              carrito={receiptCart}
+              total={receiptTotal}
+              pedidoNumber={pedidoNumber}
+              fechaCompra={fechaCompra}
+              bookingContext={bookingContext}
+              transactionId={transactionId}
+              qrValue={qrValue}
+            />
+          </div>
+
+          <div className="mt-5 grid grid-cols-1 gap-3 sm:mt-6 sm:grid-cols-2">
+            <button
+              onClick={onClose}
+              className="rounded-lg bg-slate-700 py-2 font-semibold text-white transition-colors hover:bg-slate-600"
+            >
+              {isSeatFlow ? 'Volver a cartelera' : 'Volver a dulcerÃ­a'}
+            </button>
+            <button
+              onClick={onDownload}
+              disabled={isGeneratingPDF}
+              className="rounded-lg bg-blue-600 py-2 font-semibold text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-800"
+            >
+              {isGeneratingPDF ? 'Generando PDF...' : 'Descargar PDF y salir'}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export const Dulceria = () => {
   const [carrito, setCarrito] = useState(() => {
     return [];
   });
-  const [showVerification, setShowVerification] = useState(false);
-  const [showSuccess, setShowSuccess] = useState(false);
-  const [showPayment, setShowPayment] = useState(false);
-  const [showExitConfirm, setShowExitConfirm] = useState(false);
-  const [showNotice, setShowNotice] = useState(false);
+  const [checkoutView, setCheckoutView] = useState(checkoutViews.cart);
+  const [notice, setNotice] = useState(null);
   const [isProcessingPayment, setIsProcessingPayment] = useState(false);
   const [isGeneratingPDF, setIsGeneratingPDF] = useState(false);
   const [checkoutError, setCheckoutError] = useState('');
@@ -202,12 +540,11 @@ export const Dulceria = () => {
   const [productosPorCategoria, setProductosPorCategoria] = useState(productosData);
   const [labelsPorCategoria, setLabelsPorCategoria] = useState(categoryLabels);
   const [snacksError, setSnacksError] = useState('');
+  const [snacksLoading, setSnacksLoading] = useState(true);
   const [skipSnacksForReservation, setSkipSnacksForReservation] = useState(false);
   const [lastAddedId, setLastAddedId] = useState(null);
   const [selectedPaymentMethod, setSelectedPaymentMethod] = useState('tarjeta');
   const [pendingExitAction, setPendingExitAction] = useState(null);
-  const [noticeTitle, setNoticeTitle] = useState('');
-  const [noticeMessage, setNoticeMessage] = useState('');
   const [pedidoNumber] = useState(() => {
     try {
       const saved = sessionStorage.getItem('filmate-dulceria-pedido');
@@ -232,12 +569,7 @@ export const Dulceria = () => {
     dulces: { atStart: true, atEnd: false },
   });
   const ticketRef = useRef(null);
-  const sectionRefs = {
-    combos: useRef(null),
-    popcorn: useRef(null),
-    bebidas: useRef(null),
-    dulces: useRef(null),
-  };
+  const sectionElementsRef = useRef({});
   const navigate = useNavigate();
   const location = useLocation();
   const bookingContext = location.state || null;
@@ -278,13 +610,14 @@ export const Dulceria = () => {
 
     const loadSnacks = async () => {
       try {
+        setSnacksLoading(true);
         const { categories, products } = await getSnackProducts();
         if (!isMounted) return;
 
         if (!products.length) {
           setProductosPorCategoria(productosData);
           setLabelsPorCategoria(categoryLabels);
-          setSnacksError('La API no devolvio productos de dulceria, se muestran datos locales.');
+          setSnacksError('Dulceria aun no tiene productos disponibles.');
           return;
         }
 
@@ -308,7 +641,11 @@ export const Dulceria = () => {
         console.error('Error cargando productos de dulceria:', err);
         setProductosPorCategoria(productosData);
         setLabelsPorCategoria(categoryLabels);
-        setSnacksError('No se pudo conectar con productos de dulceria, se muestran datos locales.');
+        setSnacksError('No se pudo conectar con productos de dulceria.');
+      } finally {
+        if (isMounted) {
+          setSnacksLoading(false);
+        }
       }
     };
 
@@ -353,24 +690,18 @@ export const Dulceria = () => {
 
   const requestExit = (action) => {
     setPendingExitAction(action);
-    setShowExitConfirm(true);
   };
 
   const closeExitConfirm = () => {
     setPendingExitAction(null);
-    setShowExitConfirm(false);
   };
 
   const openNotice = (title, message) => {
-    setNoticeTitle(title);
-    setNoticeMessage(message);
-    setShowNotice(true);
+    setNotice({ title, message });
   };
 
   const closeNotice = () => {
-    setShowNotice(false);
-    setNoticeTitle('');
-    setNoticeMessage('');
+    setNotice(null);
   };
 
   const confirmExit = () => {
@@ -378,15 +709,12 @@ export const Dulceria = () => {
     closeExitConfirm();
 
     if (action === 'verification') {
-      setShowPayment(false);
-      setShowVerification(true);
+      setCheckoutView(checkoutViews.verification);
       return;
     }
 
     if (action === 'dulceria') {
-      setShowSuccess(false);
-      setShowPayment(false);
-      setShowVerification(false);
+      setCheckoutView(checkoutViews.cart);
       return;
     }
 
@@ -395,8 +723,17 @@ export const Dulceria = () => {
     }
   };
 
+  const setSectionElement = (key) => (node) => {
+    if (node) {
+      sectionElementsRef.current[key] = node;
+      return;
+    }
+
+    delete sectionElementsRef.current[key];
+  };
+
   const scrollCategory = (key, direction) => {
-    const container = sectionRefs[key]?.current;
+    const container = sectionElementsRef.current[key];
     if (!container) return;
 
     const amount = Math.min(container.clientWidth * 0.8, 320);
@@ -415,23 +752,25 @@ export const Dulceria = () => {
   };
 
   const updateScrollState = (key) => {
-    const container = sectionRefs[key]?.current;
+    const container = sectionElementsRef.current[key];
     if (!container) return;
-
-    const maxScrollLeft = Math.max(0, container.scrollWidth - container.clientWidth);
-    const atStart = container.scrollLeft <= 64;
-    const atEnd = container.scrollLeft >= maxScrollLeft - 64;
 
     setScrollState((prev) => ({
       ...prev,
-      [key]: { atStart, atEnd },
+      [key]: getCategoryScrollState(container),
     }));
   };
 
   useEffect(() => {
     const syncScrollState = () => {
-      Object.keys(sectionRefs).forEach((key) => {
-        updateScrollState(key);
+      Object.keys(productosPorCategoria).forEach((key) => {
+        const container = sectionElementsRef.current[key];
+        if (!container) return;
+
+        setScrollState((prev) => ({
+          ...prev,
+          [key]: getCategoryScrollState(container),
+        }));
       });
     };
 
@@ -442,17 +781,11 @@ export const Dulceria = () => {
       window.clearTimeout(timer);
       window.removeEventListener('resize', syncScrollState);
     };
-  }, []);
-
-  const cerrarYVolverACartelera = () => {
-    limpiarYSalir();
-  };
+  }, [productosPorCategoria]);
 
   const cerrarDespuesDePago = () => {
-    setShowSuccess(false);
-    setShowVerification(false);
-    setShowPayment(false);
-    setShowExitConfirm(false);
+    setCheckoutView(checkoutViews.cart);
+    setPendingExitAction(null);
 
     if (isSeatFlow) {
       limpiarYSalir();
@@ -463,10 +796,9 @@ export const Dulceria = () => {
   };
 
   const limpiarYSalir = () => {
-    setShowSuccess(false);
-    setShowVerification(false);
-    setShowPayment(false);
-    setShowExitConfirm(false);
+    setCheckoutView(checkoutViews.cart);
+    setPendingExitAction(null);
+    setNotice(null);
     setCarrito([]);
     try {
       sessionStorage.removeItem('filmate-dulceria-pedido');
@@ -599,15 +931,13 @@ export const Dulceria = () => {
   const iniciarPago = () => {
     setCheckoutError('');
     setSkipSnacksForReservation(false);
-    setShowVerification(false);
-    setShowPayment(true);
+    setCheckoutView(checkoutViews.payment);
   };
 
   const omitirSnacks = () => {
     setCheckoutError('');
     setSkipSnacksForReservation(true);
-    setShowVerification(false);
-    setShowPayment(true);
+    setCheckoutView(checkoutViews.payment);
   };
 
   const confirmarPago = async () => {
@@ -644,8 +974,7 @@ export const Dulceria = () => {
         });
 
         setCheckoutResult(response);
-        setShowPayment(false);
-        setShowSuccess(true);
+        setCheckoutView(checkoutViews.success);
       } catch (err) {
         setCheckoutError(err?.message || 'No se pudo completar la reserva.');
       } finally {
@@ -657,8 +986,7 @@ export const Dulceria = () => {
     setIsProcessingPayment(true);
     await new Promise((resolve) => window.setTimeout(resolve, 1800));
     setIsProcessingPayment(false);
-    setShowPayment(false);
-    setShowSuccess(true);
+    setCheckoutView(checkoutViews.success);
   };
 
   const selectedPayment = paymentOptions.find((option) => option.id === selectedPaymentMethod);
@@ -680,13 +1008,35 @@ export const Dulceria = () => {
     navigate(-1);
   };
 
-  const renderCategory = (key, productos) => (
-    <section className="mb-12">
+  const renderCategory = (key, productos) => {
+    const label = labelsPorCategoria[key] || categoryLabels[key] || key;
+
+    return (
+      <section className="mb-12">
       <div className="mb-5">
         <h3 className="text-2xl font-bold text-white">{label}</h3>
       </div>
 
       <div className="relative">
+        {snacksLoading ? (
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {[0, 1, 2].map((item) => (
+              <div key={item} className="h-72 animate-pulse rounded-2xl border border-slate-700 bg-slate-900">
+                <div className="h-40 rounded-t-2xl bg-slate-800" />
+                <div className="space-y-3 p-4">
+                  <div className="h-4 w-2/3 rounded bg-slate-800" />
+                  <div className="h-5 w-1/3 rounded bg-slate-800" />
+                  <div className="h-10 rounded bg-slate-800" />
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : productos.length === 0 ? (
+          <div className="rounded-2xl border border-slate-700 bg-slate-900/70 px-4 py-8 text-center text-sm text-slate-400">
+            Sin productos disponibles.
+          </div>
+        ) : (
+        <>
         {!scrollState[key]?.atStart && (
           <button
             onClick={() => scrollCategory(key, 'left')}
@@ -698,7 +1048,7 @@ export const Dulceria = () => {
         )}
 
         <div
-          ref={sectionRefs[key]}
+          ref={setSectionElement(key)}
           className="product-scrollbar flex gap-4 overflow-x-auto scroll-smooth pb-3 pt-2 pr-2 pl-12 snap-x snap-mandatory sm:pl-14 sm:pr-14"
           onScroll={() => updateScrollState(key)}
         >
@@ -763,8 +1113,10 @@ export const Dulceria = () => {
             <span className="text-xl leading-none">›</span>
           </button>
         )}
+        </>
+        )}
       </div>
-    </section>
+      </section>
     );
   };
 
@@ -906,7 +1258,7 @@ export const Dulceria = () => {
                       </button>
                     )}
                     <button
-                      onClick={() => setShowVerification(true)}
+                      onClick={() => setCheckoutView(checkoutViews.verification)}
                       className="w-full rounded-lg bg-green-600 py-3 font-semibold text-white transition-colors hover:bg-green-700"
                     >
                       Confirmar pedido
@@ -919,328 +1271,68 @@ export const Dulceria = () => {
         </div>
       </main>
 
-      {showVerification && (
-        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/70 p-3 sm:items-center sm:p-4">
-          <div className="w-full max-w-[95vw] overflow-hidden rounded-2xl border border-slate-700 bg-slate-900 shadow-2xl sm:max-w-md">
-            <div className="flex items-center justify-between border-b border-slate-700 px-4 py-4 sm:px-6">
-              <h2 className="text-lg font-bold text-white sm:text-xl">Verifica tu compra</h2>
-              <button
-                onClick={() => requestExit('dulceria')}
-                className="text-slate-400 transition-colors hover:text-white"
-              >
-                <X className="h-6 w-6" />
-              </button>
-            </div>
-
-            <div className="max-h-[85vh] overflow-y-auto px-4 py-5 sm:px-6">
-              <p className="mb-4 text-sm text-slate-300">
-                Tu pedido de confiteria sera preparado con estos productos.
-              </p>
-
-              <div className="mb-6 space-y-3 border-y border-slate-700 py-4">
-                {carrito.map((item) => (
-                  <div key={item.id} className="flex items-center justify-between gap-3">
-                    <div>
-                      <p className="font-semibold text-white">{item.nombre}</p>
-                      <p className="text-sm text-slate-400">
-                        {item.cantidad} x S/. {item.precio.toFixed(2)}
-                      </p>
-                    </div>
-
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={() => actualizarCantidad(item.id, item.cantidad - 1)}
-                        className="flex h-7 w-7 items-center justify-center rounded-full bg-yellow-400 text-black transition-colors hover:bg-yellow-500"
-                      >
-                        <Minus className="h-3 w-3" />
-                      </button>
-                      <span className="w-5 text-center text-white">{item.cantidad}</span>
-                      <button
-                        onClick={() => actualizarCantidad(item.id, item.cantidad + 1)}
-                        className="flex h-7 w-7 items-center justify-center rounded-full bg-yellow-400 text-black transition-colors hover:bg-yellow-500"
-                      >
-                        <Plus className="h-3 w-3" />
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-
-              <div className="mb-6 rounded-xl bg-slate-800 p-4">
-                <div className="flex items-center justify-between text-slate-300">
-                  <span>Subtotal snacks</span>
-                  <span>S/. {snacksTotal.toFixed(2)}</span>
-                </div>
-                {isSeatFlow && (
-                  <div className="mt-2 flex items-center justify-between text-slate-300">
-                    <span>Subtotal asientos</span>
-                    <span>S/. {reservationTotal.toFixed(2)}</span>
-                  </div>
-                )}
-                <div className="mt-2 flex items-center justify-between border-t border-slate-700 pt-2 text-lg font-bold text-white">
-                  <span>Total</span>
-                  <span>S/. {total.toFixed(2)}</span>
-                </div>
-              </div>
-
-              <div className="flex gap-3">
-                <button
-                  onClick={() => requestExit('dulceria')}
-                  className="flex-1 rounded-lg bg-slate-700 py-2 font-semibold text-white transition-colors hover:bg-slate-600"
-                >
-                  Cancelar pedido
-                </button>
-                <button
-                  onClick={iniciarPago}
-                  className="flex-1 rounded-lg bg-red-600 py-2 font-semibold text-white transition-colors hover:bg-red-700"
-                >
-                  Pagar ahora
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
+      {checkoutView === checkoutViews.verification && (
+        <VerificationModal
+          carrito={carrito}
+          snacksTotal={snacksTotal}
+          reservationTotal={reservationTotal}
+          total={total}
+          isSeatFlow={isSeatFlow}
+          onUpdateQuantity={actualizarCantidad}
+          onRequestExit={requestExit}
+          onPay={iniciarPago}
+        />
       )}
 
-      {showPayment && (
-        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/70 p-3 sm:items-center sm:p-4">
-          <div className="flex max-h-[92vh] w-full max-w-[95vw] flex-col overflow-y-auto rounded-2xl border border-slate-700 bg-slate-900 shadow-2xl sm:max-w-md">
-            <div className="shrink-0 flex items-center justify-between border-b border-slate-700 px-4 py-4 sm:px-6">
-              <h2 className="text-lg font-bold text-white sm:text-xl">Pago</h2>
-              <button
-                onClick={() => {
-                  requestExit('verification');
-                }}
-                className="text-slate-400 transition-colors hover:text-white"
-              >
-                <X className="h-6 w-6" />
-              </button>
-            </div>
-
-            <div className="px-4 py-5 sm:px-6">
-              <div className="mb-4 rounded-xl border border-blue-500/30 bg-blue-500/10 p-4">
-                <p className="text-sm text-slate-300">Total a cobrar</p>
-                <p className="text-3xl font-bold text-white">S/. {paymentTotal.toFixed(2)}</p>
-                {isSeatFlow && (
-                  <p className="mt-2 text-sm text-slate-200">
-                    Asientos: {seatsCount} · Subtotal asientos: S/. {reservationTotal.toFixed(2)}
-                  </p>
-                )}
-                {isSeatFlow && skipSnacksForReservation && (
-                  <p className="mt-2 text-sm font-semibold text-emerald-300">
-                    Snacks omitidos: no se cobrarán en esta compra.
-                  </p>
-                )}
-              </div>
-
-              {checkoutError && (
-                <div className="mb-4 rounded-xl border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-100">
-                  {checkoutError}
-                </div>
-              )}
-
-              {bookingContext && (
-                <div className="mb-4 rounded-xl border border-slate-700 bg-slate-800 p-4">
-                  <p className="text-xs uppercase tracking-[0.25em] text-slate-400">Película y asientos</p>
-                  <p className="mt-2 text-lg font-bold text-white">{bookingContext.pelicula}</p>
-                  <p className="mt-1 text-sm text-slate-300">
-                    {bookingContext.sede} · {bookingContext.horario} · {bookingContext.sala}
-                  </p>
-                  <p className="mt-2 text-sm text-slate-300">
-                    {bookingContext.asientos?.length ? bookingContext.asientos.join(', ') : 'Sin asientos'}
-                  </p>
-                </div>
-              )}
-
-              <div className="mb-6 grid grid-cols-1 gap-3 sm:grid-cols-2">
-                {paymentOptions.map((option) => {
-                  const Icon = option.icon;
-                  const active = selectedPaymentMethod === option.id;
-
-                  return (
-                    <button
-                      key={option.id}
-                      onClick={() => setSelectedPaymentMethod(option.id)}
-                      className={`rounded-2xl border p-4 text-left transition-all ${
-                        active
-                          ? 'border-blue-400 bg-blue-500/10 ring-2 ring-blue-400/40'
-                          : 'border-slate-700 bg-slate-800 hover:border-slate-500 hover:bg-slate-700'
-                      }`}
-                    >
-                      <div className="mb-2 flex items-center gap-3">
-                        <div
-                          className={`flex h-10 w-10 items-center justify-center rounded-full ${
-                            active ? 'bg-blue-500/20 text-blue-300' : 'bg-slate-700 text-slate-200'
-                          }`}
-                        >
-                          <Icon className="h-5 w-5" />
-                        </div>
-                        <div>
-                          <p className="font-semibold text-white">{option.label}</p>
-                          <p className="text-xs text-slate-400">{option.description}</p>
-                        </div>
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
-
-              <div className="mb-6 rounded-xl bg-slate-800 p-4">
-                <div className="mb-3 flex items-center justify-between text-sm text-slate-300">
-                  <span>Método seleccionado</span>
-                  <span className="text-blue-300">{selectedPayment?.label}</span>
-                </div>
-                <div className="mb-3 flex items-center justify-between text-sm text-slate-300">
-                  <span>Estado</span>
-                  <span className={isProcessingPayment ? 'text-yellow-300' : 'text-emerald-300'}>
-                    {isProcessingPayment ? 'Procesando...' : 'Listo para pagar'}
-                  </span>
-                </div>
-                <div className="h-2 overflow-hidden rounded-full bg-slate-700">
-                  <div
-                    className={`h-full rounded-full bg-gradient-to-r from-blue-500 to-emerald-400 transition-all duration-500 ${
-                      isProcessingPayment ? 'w-[85%] animate-pulse' : 'w-[30%]'
-                    }`}
-                  />
-                </div>
-              </div>
-
-              <div className="mt-6 flex gap-3 pb-1">
-                <button
-                  onClick={() => {
-                    requestExit('verification');
-                  }}
-                  className="flex-1 rounded-lg bg-slate-700 py-2 font-semibold text-white transition-colors hover:bg-slate-600"
-                >
-                  Cancelar
-                </button>
-                <button
-                  onClick={confirmarPago}
-                  disabled={isProcessingPayment}
-                  className="flex-1 rounded-lg bg-emerald-600 py-2 font-semibold text-white transition-colors hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-emerald-800"
-                >
-                  {isProcessingPayment ? 'Pagando...' : `Pagar con ${selectedPayment?.label || 'método'}`}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
+      {checkoutView === checkoutViews.payment && (
+        <PaymentModal
+          paymentTotal={paymentTotal}
+          isSeatFlow={isSeatFlow}
+          seatsCount={seatsCount}
+          reservationTotal={reservationTotal}
+          skipSnacksForReservation={skipSnacksForReservation}
+          checkoutError={checkoutError}
+          bookingContext={bookingContext}
+          selectedPaymentMethod={selectedPaymentMethod}
+          selectedPayment={selectedPayment}
+          isProcessingPayment={isProcessingPayment}
+          onSelectPaymentMethod={setSelectedPaymentMethod}
+          onRequestExit={requestExit}
+          onConfirmPayment={confirmarPago}
+        />
       )}
 
-      {showExitConfirm && (
-        <div className="fixed inset-0 z-[60] flex items-end justify-center bg-black/80 p-3 sm:items-center sm:p-4">
-          <div className="w-full max-w-[95vw] overflow-hidden rounded-3xl border border-slate-700 bg-slate-800 shadow-2xl sm:max-w-md">
-            <div className="flex items-center gap-4 border-b border-slate-700 px-4 py-4 sm:px-6">
-              <div className="flex h-12 w-12 items-center justify-center rounded-full bg-yellow-500/15 text-yellow-300">
-                <AlertTriangle className="h-6 w-6" />
-              </div>
-              <div>
-                <h2 className="text-lg font-bold text-white sm:text-xl">
-                  {pendingExitAction === 'verification' ? '¿Cancelar el pago?' : '¿Seguro que quieres salir?'}
-                </h2>
-                <p className="text-sm text-slate-400">
-                  {pendingExitAction === 'verification'
-                    ? 'Volverás a la verificación del pedido.'
-                    : 'Tu pedido se mantendrá guardado mientras sigas en esta sesión.'}
-                </p>
-              </div>
-            </div>
-
-            <div className="px-4 py-5 sm:px-6">
-              <p className="mb-6 text-sm leading-relaxed text-slate-300">
-                {pendingExitAction === 'verification'
-                  ? 'Si cancelas, regresarás al resumen de tu compra para revisar o cambiar tus productos.'
-                  : 'Si sales ahora, volverás a la dulcería y no perderás lo que ya llevas en el carrito.'}
-              </p>
-
-              <div className="flex gap-3">
-                <button
-                  onClick={closeExitConfirm}
-                  className="flex-1 rounded-lg bg-slate-700 py-2 font-semibold text-white transition-colors hover:bg-slate-600"
-                >
-                  No, volver
-                </button>
-                <button
-                  onClick={confirmExit}
-                  className="flex-1 rounded-lg bg-yellow-500 py-2 font-semibold text-slate-950 transition-colors hover:bg-yellow-400"
-                >
-                  {pendingExitAction === 'verification' ? 'Sí, volver' : 'Sí, salir'}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
+      {pendingExitAction && (
+        <ExitConfirmDialog
+          pendingExitAction={pendingExitAction}
+          onClose={closeExitConfirm}
+          onConfirm={confirmExit}
+        />
       )}
 
-      {showNotice && (
-        <div className="fixed inset-0 z-[70] flex items-end justify-center bg-black/80 p-3 sm:items-center sm:p-4">
-          <div className="w-full max-w-[95vw] overflow-hidden rounded-3xl border border-slate-700 bg-slate-800 shadow-2xl sm:max-w-md">
-            <div className="flex items-center gap-4 border-b border-slate-700 px-4 py-4 sm:px-6">
-              <div className="flex h-12 w-12 items-center justify-center rounded-full bg-red-500/15 text-red-300">
-                <AlertTriangle className="h-6 w-6" />
-              </div>
-              <div>
-                <h2 className="text-lg font-bold text-white sm:text-xl">{noticeTitle}</h2>
-                <p className="text-sm text-slate-400">Revisa el mensaje antes de continuar.</p>
-              </div>
-            </div>
-
-            <div className="px-4 py-5 sm:px-6">
-              <p className="mb-6 text-sm leading-relaxed text-slate-300">{noticeMessage}</p>
-              <button
-                onClick={closeNotice}
-                className="w-full rounded-lg bg-blue-600 py-2 font-semibold text-white transition-colors hover:bg-blue-700"
-              >
-                Entendido
-              </button>
-            </div>
-          </div>
-        </div>
+      {notice && (
+        <NoticeDialog
+          notice={notice}
+          onClose={closeNotice}
+        />
       )}
 
-      {showSuccess && (
-        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/70 p-3 sm:items-center sm:p-4">
-          <div className="relative w-full max-w-[95vw] overflow-hidden rounded-2xl border border-slate-700 bg-slate-900 shadow-2xl sm:max-w-2xl">
-            <button
-              onClick={cerrarDespuesDePago}
-              className="absolute left-4 top-4 text-slate-400 transition-colors hover:text-white"
-            >
-              <ArrowLeft className="h-6 w-6" />
-            </button>
-
-            <div className="max-h-[92vh] overflow-y-auto p-4 sm:p-6">
-              <div ref={ticketRef}>
-                <TicketContent
-                  carrito={receiptCart}
-                  total={receiptTotal}
-                  pedidoNumber={pedidoNumber}
-                  fechaCompra={fechaCompra}
-                  bookingContext={bookingContext}
-                  transactionId={transactionId}
-                  qrValue={qrValue}
-                />
-              </div>
-
-              <div className="mt-5 grid grid-cols-1 gap-3 sm:mt-6 sm:grid-cols-2">
-                <button
-                  onClick={cerrarDespuesDePago}
-                  className="rounded-lg bg-slate-700 py-2 font-semibold text-white transition-colors hover:bg-slate-600"
-                >
-                  {isSeatFlow ? 'Volver a cartelera' : 'Volver a dulcería'}
-                </button>
-                <button
-                  onClick={descargarPDF}
-                  disabled={isGeneratingPDF}
-                  className="rounded-lg bg-blue-600 py-2 font-semibold text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-800"
-                >
-                  {isGeneratingPDF ? 'Generando PDF...' : 'Descargar PDF y salir'}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
+      {checkoutView === checkoutViews.success && (
+        <SuccessModal
+          ticketRef={ticketRef}
+          receiptCart={receiptCart}
+          receiptTotal={receiptTotal}
+          pedidoNumber={pedidoNumber}
+          fechaCompra={fechaCompra}
+          bookingContext={bookingContext}
+          transactionId={transactionId}
+          qrValue={qrValue}
+          isSeatFlow={isSeatFlow}
+          isGeneratingPDF={isGeneratingPDF}
+          onClose={cerrarDespuesDePago}
+          onDownload={descargarPDF}
+        />
       )}
-
       <Footer />
     </div>
   );
