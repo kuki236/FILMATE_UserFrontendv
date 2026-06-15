@@ -1,17 +1,17 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import Header from './Header.jsx';
 import { PencilLine, Search } from 'lucide-react';
 import { getAuthSession } from './authSession';
 import {
-  getFavoriteMovies,
-  getFollowers,
-  getFollowing,
-  getUserInteractions,
-  getUserProfile,
+  getSocialSummary,
+  getUserRatedMovies,
+  getUserRatingDistribution,
+  searchUsers,
 } from './filmateApi';
 
 const FALLBACK_POSTER = 'https://placehold.co/400x600/0f172a/f8fafc?text=Filmate';
+const DEFAULT_RATING_DISTRIBUTION = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
 
 const tabs = ['Perfil', 'Películas', 'Listas', 'Actividad', 'Reseñas', 'Favoritos'];
 
@@ -52,10 +52,18 @@ export const Social = () => {
 
   const [profile, setProfile] = useState(sessionUser || null);
   const [favoriteMovies, setFavoriteMovies] = useState([]);
-  const [interactions, setInteractions] = useState([]);
-  const [followers, setFollowers] = useState([]);
-  const [following, setFollowing] = useState([]);
+  const [socialStatsData, setSocialStatsData] = useState({
+    totalMovies: 0,
+    totalReviews: 0,
+    followers: 0,
+    following: 0,
+  });
+  const [ratingDistribution, setRatingDistribution] = useState(DEFAULT_RATING_DISTRIBUTION);
+  const [ratedMovies, setRatedMovies] = useState([]);
   const [query, setQuery] = useState('');
+  const [userSearchResults, setUserSearchResults] = useState([]);
+  const [userSearchLoading, setUserSearchLoading] = useState(false);
+  const [userSearchError, setUserSearchError] = useState('');
   const [loading, setLoading] = useState(shouldLoadSocial);
   const [loadError, setLoadError] = useState('');
   const [failedAvatarUrl, setFailedAvatarUrl] = useState('');
@@ -70,41 +78,27 @@ export const Social = () => {
     }
 
     Promise.allSettled([
-      getUserProfile(userId),
-      getFavoriteMovies(userId),
-      getUserInteractions(userId),
-      getFollowers(userId),
-      getFollowing(userId),
+      getSocialSummary(userId),
+      getUserRatingDistribution(userId),
+      getUserRatedMovies(userId),
     ])
-      .then(([profileResult, favoritesResult, interactionsResult, followersResult, followingResult]) => {
+      .then(([summaryResult, ratingResult, ratedMoviesResult]) => {
         if (!active) return;
 
-        if (profileResult.status === 'fulfilled' && profileResult.value) {
-          setProfile(profileResult.value);
+        if (summaryResult.status === 'fulfilled' && summaryResult.value) {
+          const summary = summaryResult.value;
+          if (summary.profile) setProfile(summary.profile);
+          setSocialStatsData(summary.stats);
+          setFavoriteMovies(summary.favoriteMovies);
         }
 
-        if (favoritesResult.status === 'fulfilled') {
-          setFavoriteMovies(favoritesResult.value);
-        }
-
-        if (interactionsResult.status === 'fulfilled') {
-          setInteractions(interactionsResult.value);
-        }
-
-        if (followersResult.status === 'fulfilled') {
-          setFollowers(followersResult.value);
-        }
-
-        if (followingResult.status === 'fulfilled') {
-          setFollowing(followingResult.value);
-        }
+        if (ratingResult.status === 'fulfilled') setRatingDistribution(ratingResult.value);
+        if (ratedMoviesResult.status === 'fulfilled') setRatedMovies(ratedMoviesResult.value);
 
         const hasFailure = [
-          profileResult,
-          favoritesResult,
-          interactionsResult,
-          followersResult,
-          followingResult,
+          summaryResult,
+          ratingResult,
+          ratedMoviesResult,
         ].some((result) => result.status === 'rejected');
 
         if (hasFailure) {
@@ -120,24 +114,62 @@ export const Social = () => {
     };
   }, [shouldLoadSocial, userId]);
 
+  useEffect(() => {
+    const normalizedQuery = query.trim();
+    let active = true;
+
+    if (!shouldLoadSocial || normalizedQuery.length < 2) {
+      const timer = window.setTimeout(() => {
+        if (!active) return;
+        setUserSearchResults([]);
+        setUserSearchLoading(false);
+        setUserSearchError('');
+      }, 0);
+
+      return () => {
+        active = false;
+        window.clearTimeout(timer);
+      };
+    }
+
+    const timer = window.setTimeout(() => {
+      if (!active) return;
+      setUserSearchLoading(true);
+      setUserSearchError('');
+
+      searchUsers(normalizedQuery)
+        .then((results) => {
+          if (active) setUserSearchResults(results);
+        })
+        .catch((error) => {
+          if (!active) return;
+          setUserSearchResults([]);
+          setUserSearchError(error?.message || 'No se pudo buscar usuarios.');
+        })
+        .finally(() => {
+          if (active) setUserSearchLoading(false);
+        });
+    }, 300);
+
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+    };
+  }, [query, shouldLoadSocial]);
+
   const displayName = getDisplayName(profile || sessionUser, isRegistered);
   const avatarUrl = profile?.url_perfil || sessionUser?.url_perfil || '';
-  const watchedCount = interactions.filter((item) => item?.vista).length;
+  const ratedMoviesCount = ratedMovies.length || socialStatsData.totalMovies || socialStatsData.totalReviews;
   const bioText = getBioText(profile, isRegistered);
   const hasRealBio = Boolean(profile?.bio || profile?.descripcion || profile?.presentacion);
+  const maxRatingCount = Math.max(1, ...Object.values(ratingDistribution).map((value) => Number(value) || 0));
+  const totalRatings = Object.values(ratingDistribution).reduce((sum, value) => sum + Number(value || 0), 0);
 
   const socialStats = [
-    { value: formatStat(watchedCount), label: 'Películas' },
-    { value: formatStat(following.length), label: 'Siguiendo' },
-    { value: formatStat(followers.length), label: 'Seguidores' },
+    { value: formatStat(ratedMoviesCount), label: 'Películas' },
+    { value: formatStat(socialStatsData.following), label: 'Siguiendo' },
+    { value: formatStat(socialStatsData.followers), label: 'Seguidores' },
   ];
-
-  const filteredFavorites = useMemo(() => {
-    const normalizedQuery = query.trim().toLowerCase();
-    if (!normalizedQuery) return favoriteMovies;
-
-    return favoriteMovies.filter((movie) => movie?.titulo?.toLowerCase().includes(normalizedQuery));
-  }, [favoriteMovies, query]);
 
   const handleImageFallback = (event) => {
     event.currentTarget.src = FALLBACK_POSTER;
@@ -187,15 +219,51 @@ export const Social = () => {
               </div>
 
               <div className="space-y-4 lg:justify-self-end">
-                <label className="ml-auto flex w-full max-w-sm items-center overflow-hidden rounded-xl bg-[#2a6bb7] px-3 py-2 shadow-lg shadow-blue-900/20">
-                  <Search className="h-5 w-5 shrink-0 text-black" />
-                  <input
-                    value={query}
-                    onChange={(event) => setQuery(event.target.value)}
-                    className="ml-3 min-w-0 flex-1 bg-transparent text-lg font-bold text-white outline-none placeholder:text-white/70"
-                    placeholder="Buscar favoritas"
-                  />
-                </label>
+                <div className="relative ml-auto w-full max-w-sm">
+                  <label className="flex w-full items-center overflow-hidden rounded-xl bg-[#2a6bb7] px-3 py-2 shadow-lg shadow-blue-900/20">
+                    <Search className="h-5 w-5 shrink-0 text-black" />
+                    <input
+                      value={query}
+                      onChange={(event) => setQuery(event.target.value)}
+                      className="ml-3 min-w-0 flex-1 bg-transparent text-lg font-bold text-white outline-none placeholder:text-white/70"
+                      placeholder="Buscar usuarios"
+                    />
+                  </label>
+
+                  {query.trim().length >= 2 && (
+                    <div className="absolute right-0 z-30 mt-2 w-full overflow-hidden rounded-md border border-slate-700 bg-slate-950 shadow-2xl shadow-black/40">
+                      {userSearchLoading ? (
+                        <p className="px-4 py-3 text-sm font-semibold text-white/65">Buscando usuarios...</p>
+                      ) : userSearchError ? (
+                        <p className="px-4 py-3 text-sm font-semibold text-red-200">{userSearchError}</p>
+                      ) : userSearchResults.length > 0 ? (
+                        <div className="max-h-72 overflow-y-auto">
+                          {userSearchResults.map((user) => (
+                            <div key={user.id_usuario || user.id} className="flex items-center gap-3 border-b border-slate-800 px-4 py-3 last:border-b-0">
+                              <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-full bg-slate-800">
+                                {user.url_perfil ? (
+                                  <img
+                                    src={user.url_perfil}
+                                    alt={user.nombre || user.username || 'Usuario'}
+                                    className="h-full w-full object-cover"
+                                  />
+                                ) : (
+                                  <span className="text-sm font-black text-white/60">U</span>
+                                )}
+                              </div>
+                              <div className="min-w-0">
+                                <p className="truncate text-sm font-extrabold text-white">{user.nombre || 'Usuario'}</p>
+                                <p className="truncate text-xs font-semibold text-white/50">{user.username || user.correo || 'Perfil social'}</p>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="px-4 py-3 text-sm font-semibold text-white/65">Sin usuarios encontrados.</p>
+                      )}
+                    </div>
+                  )}
+                </div>
 
                 <div className="grid grid-cols-3 gap-0 text-center">
                   {socialStats.map((stat, index) => (
@@ -253,8 +321,9 @@ export const Social = () => {
                   {[1, 2, 3, 4, 5].map((rating) => (
                     <div
                       key={rating}
-                      className="w-4 rounded-t-full bg-white/20"
-                      style={{ height: 10 + rating * 4 }}
+                      className={`w-4 rounded-t-full ${ratingDistribution[rating] ? 'bg-[#ff2b50]' : 'bg-white/20'}`}
+                      style={{ height: 12 + (Number(ratingDistribution[rating] || 0) / maxRatingCount) * 64 }}
+                      title={`${rating} estrellas: ${ratingDistribution[rating] || 0}`}
                     />
                   ))}
                 </div>
@@ -262,9 +331,23 @@ export const Social = () => {
                   <span>★ 1</span>
                   <span>★ 5</span>
                 </div>
-                <p className="mt-3 text-sm font-medium text-white/55">
-                  Sin calificaciones disponibles.
-                </p>
+                {totalRatings > 0 ? (
+                  <div className="mt-3 space-y-2">
+                    <p className="text-sm font-medium text-white/55">
+                      {totalRatings} calificaciones registradas.
+                    </p>
+                    {ratedMovies.slice(0, 3).map((item) => (
+                      <div key={item.movie?.id || item.movie?.titulo} className="flex items-center justify-between gap-3 text-sm">
+                        <span className="truncate font-semibold text-white/70">{item.movie?.titulo || 'Pelicula'}</span>
+                        <span className="shrink-0 font-black text-amber-400">★ {item.rating}</span>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="mt-3 text-sm font-medium text-white/55">
+                    Sin calificaciones disponibles.
+                  </p>
+                )}
               </div>
             </aside>
 
@@ -280,9 +363,9 @@ export const Social = () => {
                     />
                   ))}
                 </div>
-              ) : filteredFavorites.length > 0 ? (
+              ) : favoriteMovies.length > 0 ? (
                 <div className="grid flex-1 grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-5">
-                  {filteredFavorites.map((movie) => (
+                  {favoriteMovies.map((movie) => (
                     <article
                       key={movie.id}
                       className="group min-h-[280px] overflow-hidden rounded-md border border-slate-800 bg-slate-900 shadow-xl shadow-black/25 transition-transform hover:-translate-y-1 hover:shadow-2xl"
@@ -301,7 +384,7 @@ export const Social = () => {
                 <div className="flex flex-1 items-center justify-center rounded-md border border-dashed border-slate-700 bg-slate-900/40 px-6 py-12 text-center">
                   <p className="max-w-md text-base font-semibold text-white/65">
                     {query
-                      ? 'No hay películas favoritas que coincidan con la búsqueda.'
+                      ? 'Usa el buscador superior para encontrar usuarios.'
                       : isRegistered
                         ? 'Aún no tienes películas favoritas registradas.'
                         : 'Inicia sesión para ver tus películas favoritas.'}

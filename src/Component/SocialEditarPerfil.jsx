@@ -4,11 +4,11 @@ import { Link } from 'react-router-dom';
 import Header from './Header.jsx';
 import { getAuthSession, saveRegisteredSession } from './authSession';
 import {
-  getFavoriteMovies,
   getMovies,
-  getUserInteractions,
-  getUserProfile,
-  updateMovieInteraction,
+  getSocialSummary,
+  searchMovies,
+  updateFavoriteMovies,
+  updateSocialProfile,
   updateUserProfile,
 } from './filmateApi';
 
@@ -24,7 +24,16 @@ const getProfileForm = (profile) => ({
   correo: profile?.correo || '',
   telefono: profile?.telefono || '',
   url_perfil: profile?.url_perfil || '',
+  bio: profile?.bio || profile?.descripcion || profile?.presentacion || '',
 });
+
+const mergeMovies = (current, nextMovies) => {
+  const map = new Map(current.map((movie) => [movie.id, movie]));
+  nextMovies.forEach((movie) => {
+    if (movie?.id) map.set(movie.id, movie);
+  });
+  return [...map.values()];
+};
 
 const createAvatarOptions = () =>
   Array.from({ length: 10 }, (_, index) => {
@@ -46,11 +55,12 @@ export const SocialEditarPerfil = () => {
   const [profile, setProfile] = useState(sessionUser || null);
   const [form, setForm] = useState(() => getProfileForm(sessionUser));
   const [allMovies, setAllMovies] = useState([]);
+  const [movieCache, setMovieCache] = useState([]);
   const [favoriteMovies, setFavoriteMovies] = useState([]);
-  const [interactions, setInteractions] = useState([]);
   const [selectedMovieIds, setSelectedMovieIds] = useState([]);
   const [draftMovieIds, setDraftMovieIds] = useState([]);
   const [movieQuery, setMovieQuery] = useState('');
+  const [movieSearchLoading, setMovieSearchLoading] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
   const [avatarModalOpen, setAvatarModalOpen] = useState(false);
   const [draftAvatarUrl, setDraftAvatarUrl] = useState('');
@@ -72,34 +82,30 @@ export const SocialEditarPerfil = () => {
     }
 
     Promise.allSettled([
-      getUserProfile(userId),
-      getMovies({ limit: 500 }),
-      getFavoriteMovies(userId),
-      getUserInteractions(userId),
+      getSocialSummary(userId),
+      getMovies({ limit: 50 }),
     ])
-      .then(([profileResult, moviesResult, favoritesResult, interactionsResult]) => {
+      .then(([summaryResult, moviesResult]) => {
         if (!active) return;
 
-        if (profileResult.status === 'fulfilled' && profileResult.value) {
-          setProfile(profileResult.value);
-          setForm(getProfileForm(profileResult.value));
+        if (summaryResult.status === 'fulfilled' && summaryResult.value) {
+          const summary = summaryResult.value;
+          const nextProfile = summary.profile || sessionUser;
+          const nextFavorites = summary.favoriteMovies.slice(0, MAX_FAVORITES);
+
+          setProfile(nextProfile);
+          setForm(getProfileForm(nextProfile));
+          setFavoriteMovies(nextFavorites);
+          setSelectedMovieIds(nextFavorites.map((movie) => movie.id));
+          setMovieCache((current) => mergeMovies(current, nextFavorites));
         }
 
         if (moviesResult.status === 'fulfilled') {
           setAllMovies(moviesResult.value);
+          setMovieCache((current) => mergeMovies(current, moviesResult.value));
         }
 
-        if (favoritesResult.status === 'fulfilled') {
-          const nextFavorites = favoritesResult.value.slice(0, MAX_FAVORITES);
-          setFavoriteMovies(nextFavorites);
-          setSelectedMovieIds(nextFavorites.map((movie) => movie.id));
-        }
-
-        if (interactionsResult.status === 'fulfilled') {
-          setInteractions(interactionsResult.value);
-        }
-
-        const hasFailure = [profileResult, moviesResult, favoritesResult, interactionsResult].some(
+        const hasFailure = [summaryResult, moviesResult].some(
           (result) => result.status === 'rejected'
         );
 
@@ -114,12 +120,49 @@ export const SocialEditarPerfil = () => {
     return () => {
       active = false;
     };
-  }, [userId]);
+  }, [sessionUser, userId]);
+
+  useEffect(() => {
+    let active = true;
+
+    if (!modalOpen) {
+      return () => {
+        active = false;
+      };
+    }
+
+    const normalizedQuery = movieQuery.trim();
+
+    const timer = window.setTimeout(() => {
+      if (!active) return;
+      setMovieSearchLoading(true);
+
+      const request = normalizedQuery ? searchMovies(normalizedQuery) : getMovies({ limit: 50 });
+
+      request
+        .then((movies) => {
+          if (!active) return;
+          setAllMovies(movies);
+          setMovieCache((current) => mergeMovies(current, movies));
+        })
+        .catch((err) => {
+          if (active) setError(err?.message || 'No se pudo buscar peliculas.');
+        })
+        .finally(() => {
+          if (active) setMovieSearchLoading(false);
+        });
+    }, normalizedQuery ? 300 : 0);
+
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+    };
+  }, [modalOpen, movieQuery]);
 
   const moviesById = useMemo(() => {
-    const entries = [...allMovies, ...favoriteMovies].map((movie) => [movie.id, movie]);
+    const entries = [...movieCache, ...allMovies, ...favoriteMovies].map((movie) => [movie.id, movie]);
     return new Map(entries);
-  }, [allMovies, favoriteMovies]);
+  }, [movieCache, allMovies, favoriteMovies]);
 
   const selectedMovies = useMemo(
     () => selectedMovieIds.map((id) => moviesById.get(id)).filter(Boolean),
@@ -150,10 +193,6 @@ export const SocialEditarPerfil = () => {
       })
       .map((result) => result.movie);
   }, [allMovies, movieQuery]);
-
-  const interactionByMovieId = useMemo(() => {
-    return new Map(interactions.map((item) => [item.id_pelicula, item]));
-  }, [interactions]);
 
   const handleFormChange = (field, value) => {
     setForm((current) => ({ ...current, [field]: value }));
@@ -233,40 +272,28 @@ export const SocialEditarPerfil = () => {
         url_perfil: form.url_perfil.trim(),
       });
 
-      const nextSelected = new Set(selectedMovieIds);
-      const previousFavoriteIds = new Set(favoriteMovies.map((movie) => movie.id));
-      const movieIdsToUpdate = new Set([...previousFavoriteIds, ...nextSelected]);
+      const updatedSocialProfile = await updateSocialProfile(userId, {
+        bio: form.bio.trim(),
+      });
 
-      await Promise.all(
-        [...movieIdsToUpdate].map((movieId) => {
-          const existing = interactionByMovieId.get(movieId);
-          return updateMovieInteraction({
-            id_usuario: userId,
-            id_pelicula: movieId,
-            vista: existing?.vista || false,
-            favorita: nextSelected.has(movieId),
-            en_lista_seguimiento: existing?.en_lista_seguimiento || false,
-          });
-        })
-      );
+      await updateFavoriteMovies(userId, selectedMovieIds);
+
+      const mergedProfile = {
+        ...updatedProfile,
+        bio: updatedSocialProfile?.bio ?? form.bio.trim(),
+      };
 
       const nextSessionUser = {
         ...sessionUser,
-        ...updatedProfile,
+        ...mergedProfile,
       };
 
       saveRegisteredSession(nextSessionUser);
-      setProfile(updatedProfile);
-      setForm(getProfileForm(updatedProfile));
+      setProfile(mergedProfile);
+      setForm(getProfileForm(mergedProfile));
       setProfileEditing(false);
       setFavoriteMovies(selectedMovies);
-      setInteractions((current) =>
-        current.map((item) =>
-          movieIdsToUpdate.has(item.id_pelicula)
-            ? { ...item, favorita: nextSelected.has(item.id_pelicula) }
-            : item
-        )
-      );
+      setMovieCache((current) => mergeMovies(current, selectedMovies));
       setSuccess('Perfil actualizado correctamente.');
     } catch (err) {
       setError(err?.message || 'No se pudo actualizar el perfil.');
@@ -406,6 +433,18 @@ export const SocialEditarPerfil = () => {
                       disabled={!profileEditing}
                       className="mt-2 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-white outline-none transition focus:border-sky-400 disabled:cursor-not-allowed disabled:opacity-55"
                       placeholder="999999999"
+                    />
+                  </label>
+
+                  <label className="block sm:col-span-2">
+                    <span className="text-sm font-bold text-white/75">Bio</span>
+                    <textarea
+                      value={form.bio}
+                      onChange={(event) => handleFormChange('bio', event.target.value)}
+                      disabled={!profileEditing}
+                      rows={4}
+                      className="mt-2 w-full resize-none rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-white outline-none transition focus:border-sky-400 disabled:cursor-not-allowed disabled:opacity-55"
+                      placeholder="Cuenta algo sobre tu gusto por el cine"
                     />
                   </label>
                 </div>
@@ -595,6 +634,12 @@ export const SocialEditarPerfil = () => {
             </div>
 
             <div className="min-h-0 flex-1 overflow-y-auto p-5">
+              {movieSearchLoading && (
+                <div className="mb-4 rounded-md border border-slate-700 bg-slate-950 px-4 py-3 text-sm font-semibold text-white/65">
+                  Buscando peliculas en la base de datos...
+                </div>
+              )}
+
               <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5">
                 {filteredMovies.map((movie) => {
                   const selected = draftMovieIds.includes(movie.id);
@@ -633,7 +678,7 @@ export const SocialEditarPerfil = () => {
                 })}
               </div>
 
-              {!filteredMovies.length && (
+              {!movieSearchLoading && !filteredMovies.length && (
                 <div className="flex min-h-60 items-center justify-center rounded-md border border-dashed border-slate-700 text-center text-sm font-semibold text-white/55">
                   No hay peliculas para mostrar.
                 </div>

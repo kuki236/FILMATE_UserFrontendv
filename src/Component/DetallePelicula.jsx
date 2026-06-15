@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { AlertTriangle, ArrowLeft, ArrowRight, Armchair, Clock3, Clapperboard, Star, Play, X } from 'lucide-react';
+import { useState, useEffect, useRef } from 'react';
+import { AlertTriangle, ArrowLeft, ArrowRight, Clock3, Clapperboard, Star, Play, X } from 'lucide-react';
 import Header from './Header.jsx';
 import Footer from './Footer.jsx';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
@@ -102,6 +102,24 @@ const formatShowtimeTime = (showtime) => {
 
 const getSeatNumber = (seat) => seat?.numero ?? seat?.columna ?? '';
 
+const parseSeatSocketSeats = (event) => {
+    const message = JSON.parse(event.data);
+    const data = message?.data || message;
+
+    return Array.isArray(data?.asientos)
+        ? data.asientos.map(normalizeSeat)
+        : [];
+};
+
+const keepAvailableSelectedSeats = (selectedSeats, nextSeats) =>
+    selectedSeats.filter((selectedSeat) =>
+        nextSeats.some(
+            (seat) =>
+                seat.id_asiento === selectedSeat.id_asiento &&
+                seat.estado === 'Disponible'
+        )
+    );
+
 const getCinemaByRoomId = (roomId) => {
     const id = Number(roomId);
     if (id >= 1 && id <= 5) return { id: 1, nombre: 'Filmate La Molina' };
@@ -109,6 +127,45 @@ const getCinemaByRoomId = (roomId) => {
     if (id >= 10 && id <= 13) return { id: 3, nombre: 'Filmate San Isidro' };
     if (id >= 14 && id <= 19) return { id: 4, nombre: 'Filmate Surco' };
     return { id: `sala-${roomId || 'sin-sede'}`, nombre: 'Sede por definir' };
+};
+
+const SeatGlyph = ({
+    seatSize = 36,
+    seatNumber = '',
+    selected = false,
+    unavailable = false,
+    showNumber = true,
+}) => {
+    const c = selected
+        ? { sit: '#1D9E75', sitS: '#0F6E56', back: '#0F6E56', backS: '#085041', arms: '#085041', num: '#ffffff' }
+        : unavailable
+            ? { sit: '#ef4444', sitS: '#b91c1c', back: '#dc2626', backS: '#991b1b', arms: '#dc2626', num: '#ffffff' }
+            : { sit: '#e8e7e2', sitS: '#c8c7c0', back: '#d0cfca', backS: '#b8b7b0', arms: '#c4c3bd', num: '#444441' };
+
+    const h = Math.round(seatSize * 1.11);
+
+    return (
+        <svg width={seatSize} height={h} viewBox="0 0 36 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <rect x="1" y="3" width="4" height="18" rx="2" fill={c.arms} />
+            <rect x="31" y="3" width="4" height="18" rx="2" fill={c.arms} />
+            <rect x="6" y="1" width="24" height="24" rx="7" fill={c.sit} stroke={c.sitS} strokeWidth="1.2" />
+            <rect x="4" y="28" width="28" height="10" rx="4" fill={c.back} stroke={c.backS} strokeWidth="1" />
+            {showNumber && (
+                <text x="18" y="17" textAnchor="middle" fontSize="10" fontWeight="700" fill={c.num} fontFamily="sans-serif">
+                    {seatNumber}
+                </text>
+            )}
+            {selected && (
+                <rect x="1" y="1" width="34" height="38" rx="8" fill="none" stroke="#5DCAA5" strokeWidth="2" />
+            )}
+            {unavailable && (
+                <>
+                    <line x1="11" y1="6" x2="25" y2="20" stroke="white" strokeWidth="1.5" strokeLinecap="round" opacity="0.5" />
+                    <line x1="25" y1="6" x2="11" y2="20" stroke="white" strokeWidth="1.5" strokeLinecap="round" opacity="0.5" />
+                </>
+            )}
+        </svg>
+    );
 };
 
 export const DetallePelicula = () => {
@@ -260,13 +317,17 @@ export const DetallePelicula = () => {
     useEffect(() => {
         if (!returnSeatSelection) return;
 
-        if (returnSeatSelection.selectedShow) {
-            setSelectedShow(returnSeatSelection.selectedShow);
-        }
+        const timer = window.setTimeout(() => {
+            if (returnSeatSelection.selectedShow) {
+                setSelectedShow(returnSeatSelection.selectedShow);
+            }
 
-        if (Array.isArray(returnSeatSelection.selectedSeats)) {
-            setSelectedSeats(returnSeatSelection.selectedSeats);
-        }
+            if (Array.isArray(returnSeatSelection.selectedSeats)) {
+                setSelectedSeats(returnSeatSelection.selectedSeats);
+            }
+        }, 0);
+
+        return () => window.clearTimeout(timer);
     }, [returnSeatSelection]);
 
     useEffect(() => {
@@ -311,32 +372,22 @@ export const DetallePelicula = () => {
         const socket = createSeatWebSocket(functionId);
         if (!socket) return undefined;
 
-        socket.onmessage = (event) => {
+        const handleSeatSocketMessage = (event) => {
             try {
-                const message = JSON.parse(event.data);
-                const data = message?.data || message;
-                const nextSeats = Array.isArray(data?.asientos)
-                    ? data.asientos.map(normalizeSeat)
-                    : [];
+                const nextSeats = parseSeatSocketSeats(event);
 
                 if (!nextSeats.length) return;
 
                 setSeatMap(nextSeats);
                 loadedSeatMapFunctionIdRef.current = functionId;
                 setSeatMapError('');
-                setSelectedSeats((current) =>
-                    current.filter((selectedSeat) =>
-                        nextSeats.some(
-                            (seat) =>
-                                seat.id_asiento === selectedSeat.id_asiento &&
-                                seat.estado === 'Disponible'
-                        )
-                    )
-                );
+                setSelectedSeats((current) => keepAvailableSelectedSeats(current, nextSeats));
             } catch (err) {
                 console.error('Error procesando websocket de asientos:', err);
             }
         };
+
+        socket.onmessage = handleSeatSocketMessage;
 
         socket.onerror = () => {
             console.warn('No se pudo mantener la sincronizacion en vivo de asientos.');
@@ -470,45 +521,6 @@ export const DetallePelicula = () => {
         </div>
     );
 
-    const SeatGlyph = ({
-        seatSize = 36,
-        seatNumber = '',
-        selected = false,
-        unavailable = false,
-        showNumber = true,
-    }) => {
-        const c = selected
-            ? { sit: '#1D9E75', sitS: '#0F6E56', back: '#0F6E56', backS: '#085041', arms: '#085041', num: '#ffffff' }
-            : unavailable
-                ? { sit: '#ef4444', sitS: '#b91c1c', back: '#dc2626', backS: '#991b1b', arms: '#dc2626', num: '#ffffff' }
-                : { sit: '#e8e7e2', sitS: '#c8c7c0', back: '#d0cfca', backS: '#b8b7b0', arms: '#c4c3bd', num: '#444441' };
-
-        const h = Math.round(seatSize * 1.11);
-
-        return (
-            <svg width={seatSize} height={h} viewBox="0 0 36 40" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <rect x="1" y="3" width="4" height="18" rx="2" fill={c.arms} />
-                <rect x="31" y="3" width="4" height="18" rx="2" fill={c.arms} />
-                <rect x="6" y="1" width="24" height="24" rx="7" fill={c.sit} stroke={c.sitS} strokeWidth="1.2" />
-                <rect x="4" y="28" width="28" height="10" rx="4" fill={c.back} stroke={c.backS} strokeWidth="1" />
-                {showNumber && (
-                    <text x="18" y="17" textAnchor="middle" fontSize="10" fontWeight="700" fill={c.num} fontFamily="sans-serif">
-                        {seatNumber}
-                    </text>
-                )}
-                {selected && (
-                    <rect x="1" y="1" width="34" height="38" rx="8" fill="none" stroke="#5DCAA5" strokeWidth="2" />
-                )}
-                {unavailable && (
-                    <>
-                        <line x1="11" y1="6" x2="25" y2="20" stroke="white" strokeWidth="1.5" strokeLinecap="round" opacity="0.5" />
-                        <line x1="25" y1="6" x2="11" y2="20" stroke="white" strokeWidth="1.5" strokeLinecap="round" opacity="0.5" />
-                    </>
-                )}
-            </svg>
-        );
-    };
-
     const poster = pelicula.imagenPoster || pelicula.imagen || FALLBACK_MEDIA_IMAGE;
     const trailerImg = pelicula.imagenTrailer || pelicula.imagenPoster || pelicula.imagen || FALLBACK_MEDIA_IMAGE;
     const titulo = pelicula.titulo || 'Película';
@@ -517,9 +529,6 @@ export const DetallePelicula = () => {
         : pelicula.genero
             ? String(pelicula.genero).split(',').map((item) => item.trim()).filter(Boolean)
             : [];
-    const genero = generos.length ? generos.join(', ') : 'Género no disponible';
-    const duracion = pelicula.duracion || '';
-    const clasificacion = pelicula.clasificacion || '';
     const rating = pelicula.rating || 0;
     const sinopsis = pelicula.sinopsis || 'Sinopsis próxima a actualizar.';
     const directores = Array.isArray(pelicula.directores) && pelicula.directores.length
@@ -533,7 +542,6 @@ export const DetallePelicula = () => {
         : pelicula.reparto
             ? String(pelicula.reparto).split(',').map((item) => item.trim()).filter(Boolean)
             : [];
-    const reparto = actores.length ? actores.join(', ') : 'Por definir';
     const textoTrailer = pelicula.trailer || 'TRÁILER OFICIAL';
     const trailerUrl = pelicula.trailerUrl || '';
 
@@ -701,7 +709,7 @@ export const DetallePelicula = () => {
         );
     };
 
-    const SeatConfirmationModal = () => {
+    const renderSeatConfirmationModal = () => {
         if (!showSeatConfirm) return null;
 
         return (
@@ -762,7 +770,7 @@ export const DetallePelicula = () => {
         );
     };
 
-    const SeatSelector = () => {
+    const renderSeatSelector = () => {
         if (!selectedShow) return null;
 
         return (
@@ -1262,43 +1270,6 @@ export const DetallePelicula = () => {
                     </div>
                 </div>
 
-                {/* Modal Trailer */}
-                {false && videoId && (
-                    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-sm p-4"
-                        onClick={() => setShowTrailer(false)}
-                    >
-                        <div
-                            className="relative w-full max-w-5xl aspect-video animate-scaleIn"
-                            onClick={(e) => e.stopPropagation()}
-                        >
-                            <button
-                                onClick={() => setShowTrailer(false)}
-                                className="absolute -top-12 right-0 text-white hover:text-red-500 transition-colors p-2 hover:bg-white/10 rounded-full z-10"
-                            >
-                                <X className="w-8 h-8" />
-                            </button>
-                            <iframe
-                                className="w-full h-full rounded-2xl shadow-2xl"
-                                src={`https://www.youtube.com/embed/${videoId}?autoplay=1`}
-                                title="YouTube video player"
-                                frameBorder="0"
-                                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                                allowFullScreen
-                            ></iframe>
-                            {trailerUrl && (
-                                <a
-                                    href={trailerUrl}
-                                    target="_blank"
-                                    rel="noreferrer"
-                                    className="absolute bottom-4 left-4 rounded-full bg-black/60 px-4 py-2 text-sm font-semibold text-white backdrop-blur-sm transition-colors hover:bg-black/80"
-                                >
-                                    Abrir en YouTube
-                                </a>
-                            )}
-                        </div>
-                    </div>
-                )}
-
                 {showSeatHelp && (
                     <div
                         className="fixed inset-0 z-[70] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4"
@@ -1405,9 +1376,9 @@ export const DetallePelicula = () => {
                 )}
             </div>
 
-            <SeatConfirmationModal />
+            {renderSeatConfirmationModal()}
 
-            {selectedShow && <SeatSelector />}
+            {selectedShow && renderSeatSelector()}
 
             <Footer />
 
