@@ -28,6 +28,14 @@ function App() {
           }
         />
         <Route
+          path="/social/:profileUserId"
+          element={
+            <ProtectedRoute requireRegistered>
+              <Social />
+            </ProtectedRoute>
+          }
+        />
+        <Route
           path="/social/editarPerfil"
           element={
             <ProtectedRoute requireRegistered>

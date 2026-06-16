@@ -614,13 +614,23 @@ export async function searchUsers(query) {
   const normalizedQuery = query?.trim();
   if (!normalizedQuery) return [];
 
-  const params = new URLSearchParams({ q: normalizedQuery });
   const data = await requestFirstAvailable([
-    `/client/users/search?${params.toString()}`,
-    `/users/search?${params.toString()}`,
+    '/admin/users/?estado=ACTIVO',
+    '/admin/users/',
   ]);
 
-  return asPayloadArray(data, ['results', 'users', 'usuarios', 'items']).map(normalizeUser);
+  const queryText = normalizedQuery.toLowerCase();
+
+  return asPayloadArray(data, ['results', 'users', 'usuarios', 'items'])
+    .map(normalizeUser)
+    .filter((user) => String(user.username || '').toLowerCase().includes(queryText))
+    .sort((firstUser, secondUser) => {
+      const firstUsername = String(firstUser.username || '').toLowerCase();
+      const secondUsername = String(secondUser.username || '').toLowerCase();
+      const firstStartsWith = firstUsername.startsWith(queryText) ? 0 : 1;
+      const secondStartsWith = secondUsername.startsWith(queryText) ? 0 : 1;
+      return firstStartsWith - secondStartsWith || firstUsername.localeCompare(secondUsername);
+    });
 }
 
 export async function getUserRatingDistribution(userId) {
@@ -664,6 +674,28 @@ export async function getFollowing(userId) {
   if (!userId) return [];
   const data = await request(`/client/seguidores/${userId}/siguiendo`);
   return asArray(data);
+}
+
+export async function followUser(followerId, followedId) {
+  if (!followerId || !followedId) return null;
+
+  return requestFirstAvailable(
+    [
+      '/client/seguidores/',
+      '/client/seguidores/seguir',
+    ],
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        id_usuario: followerId,
+        id_seguidor: followerId,
+        id_usuario_seguidor: followerId,
+        id_usuario_seguido: followedId,
+        id_seguido: followedId,
+        seguido_id: followedId,
+      }),
+    }
+  );
 }
 
 export async function getSnackCategories() {
