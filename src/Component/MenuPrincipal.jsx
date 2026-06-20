@@ -1,7 +1,8 @@
 ﻿import React, { useEffect, useMemo, useState } from 'react';
-import { Filter, Star, X } from 'lucide-react';
+import { Filter, X } from 'lucide-react';
 import Header from './Header.jsx';
 import Footer from './Footer.jsx';
+import StarRatingDisplay from './StarRatingDisplay.jsx';
 import { useNavigate } from 'react-router-dom';
 import { getCinemas, getMovies, getShowtimesByDate } from './filmateApi';
 
@@ -287,18 +288,11 @@ export const MenuPrincipal = () => {
 
     const renderStars = (rating) => {
         return (
-            <div className="flex gap-1 justify-center">
-                {[...Array(5)].map((_, index) => (
-                    <Star
-                        key={index}
-                        className={`w-5 h-5 ${
-                            index < rating
-                                ? 'fill-[#FF9500] text-[#FF9500]'
-                                : 'fill-gray-600 text-gray-600'
-                        }`}
-                    />
-                ))}
-            </div>
+            <StarRatingDisplay
+                rating={rating}
+                justifyClass="justify-center"
+                emptyClass="text-gray-600"
+            />
         );
     };
 

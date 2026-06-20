@@ -7,6 +7,7 @@ import Cines from './Component/Cines.jsx';
 import Dulceria from './Component/Dulceria.jsx';
 import Social from './Component/Social.jsx';
 import SocialEditarPerfil from './Component/SocialEditarPerfil.jsx';
+import SocialPelicula from './Component/SocialPelicula.jsx';
 import DetallePelicula from './Component/DetallePelicula.jsx';
 import ProtectedRoute from './Component/ProtectedRoute.jsx';
 
@@ -40,6 +41,14 @@ function App() {
           element={
             <ProtectedRoute requireRegistered>
               <SocialEditarPerfil />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/social/pelicula/:movieId"
+          element={
+            <ProtectedRoute requireRegistered>
+              <SocialPelicula />
             </ProtectedRoute>
           }
         />

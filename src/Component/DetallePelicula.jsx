@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
-import { AlertTriangle, ArrowLeft, ArrowRight, Clock3, Clapperboard, Star, Play, X } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, ArrowRight, Clock3, Clapperboard, Play, X } from 'lucide-react';
 import Header from './Header.jsx';
 import Footer from './Footer.jsx';
+import StarRatingDisplay from './StarRatingDisplay.jsx';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { createSeatWebSocket, getMovieById, getRoomById, getSeatMap, getShowtimesByDate, normalizeSeat } from './filmateApi';
 
@@ -536,14 +537,12 @@ export const DetallePelicula = () => {
     ];
 
     const renderStars = (rating, centered = false) => (
-        <div className={`flex gap-1 ${centered ? 'justify-center' : 'justify-start'}`}>
-            {[...Array(5)].map((_, index) => (
-                <Star
-                    key={index}
-                    className={`w-4 h-4 ${index < rating ? 'fill-[#FF9500] text-[#FF9500]' : 'fill-gray-400 text-gray-400'}`}
-                />
-            ))}
-        </div>
+        <StarRatingDisplay
+            rating={rating}
+            sizeClass="h-4 w-4"
+            justifyClass={centered ? 'justify-center' : 'justify-start'}
+            emptyClass="text-gray-400"
+        />
     );
 
     const poster = pelicula.imagenPoster || pelicula.imagen || FALLBACK_MEDIA_IMAGE;

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import Header from './Header.jsx';
-import { PencilLine, Search, UserPlus } from 'lucide-react';
+import { Film, PencilLine, Search, UserPlus } from 'lucide-react';
 import { getAuthSession } from './authSession';
 import {
   followUser,
@@ -9,6 +9,7 @@ import {
   getSocialSummary,
   getUserRatedMovies,
   getUserRatingDistribution,
+  searchMovies,
   searchUsers,
 } from './filmateApi';
 
@@ -34,10 +35,9 @@ const getDisplayName = (user, isRegistered) => {
   if (!isRegistered) return 'Invitado';
 
   return (
-    user?.nombre ||
-    [user?.nombres, user?.apellidos].filter(Boolean).join(' ').trim() ||
     user?.username ||
-    'Usuario registrado'
+    user?.nombreUsuario ||
+    'usuario'
   );
 };
 
@@ -85,7 +85,7 @@ export const Social = () => {
   const isOwnProfile = isSameUser(viewedUserId, userId);
   const shouldLoadSocial = Boolean(isRegistered && viewedUserId);
 
-  const [profile, setProfile] = useState(sessionUser || null);
+  const [profile, setProfile] = useState(isOwnProfile ? sessionUser || null : null);
   const [favoriteMovies, setFavoriteMovies] = useState([]);
   const [socialStatsData, setSocialStatsData] = useState({
     totalMovies: 0,
@@ -97,8 +97,10 @@ export const Social = () => {
   const [ratedMovies, setRatedMovies] = useState([]);
   const [query, setQuery] = useState('');
   const [userSearchResults, setUserSearchResults] = useState([]);
-  const [userSearchLoading, setUserSearchLoading] = useState(false);
+  const [movieSearchResults, setMovieSearchResults] = useState([]);
+  const [searchLoading, setSearchLoading] = useState(false);
   const [userSearchError, setUserSearchError] = useState('');
+  const [movieSearchError, setMovieSearchError] = useState('');
   const [loading, setLoading] = useState(shouldLoadSocial);
   const [loadError, setLoadError] = useState('');
   const [isFollowing, setIsFollowing] = useState(false);
@@ -115,20 +117,23 @@ export const Social = () => {
       };
     }
 
-    setLoading(true);
-    setLoadError('');
-    setFollowError('');
-    setIsFollowing(false);
-    setProfile(isOwnProfile ? sessionUser || null : null);
-    setFavoriteMovies([]);
-    setRatedMovies([]);
-    setRatingDistribution(DEFAULT_RATING_DISTRIBUTION);
-    setSocialStatsData({
-      totalMovies: 0,
-      totalReviews: 0,
-      followers: 0,
-      following: 0,
-    });
+    const resetTimer = window.setTimeout(() => {
+      if (!active) return;
+      setLoading(true);
+      setLoadError('');
+      setFollowError('');
+      setIsFollowing(false);
+      setProfile(isOwnProfile ? sessionUser || null : null);
+      setFavoriteMovies([]);
+      setRatedMovies([]);
+      setRatingDistribution(DEFAULT_RATING_DISTRIBUTION);
+      setSocialStatsData({
+        totalMovies: 0,
+        totalReviews: 0,
+        followers: 0,
+        following: 0,
+      });
+    }, 0);
 
     Promise.allSettled([
       getSocialSummary(viewedUserId),
@@ -168,6 +173,7 @@ export const Social = () => {
 
     return () => {
       active = false;
+      window.clearTimeout(resetTimer);
     };
   }, [isOwnProfile, sessionUser, shouldLoadSocial, userId, viewedUserId]);
 
@@ -179,8 +185,10 @@ export const Social = () => {
       const timer = window.setTimeout(() => {
         if (!active) return;
         setUserSearchResults([]);
-        setUserSearchLoading(false);
+        setMovieSearchResults([]);
+        setSearchLoading(false);
         setUserSearchError('');
+        setMovieSearchError('');
       }, 0);
 
       return () => {
@@ -191,20 +199,33 @@ export const Social = () => {
 
     const timer = window.setTimeout(() => {
       if (!active) return;
-      setUserSearchLoading(true);
+      setSearchLoading(true);
       setUserSearchError('');
+      setMovieSearchError('');
 
-      searchUsers(normalizedQuery)
-        .then((results) => {
-          if (active) setUserSearchResults(results);
-        })
-        .catch((error) => {
+      Promise.allSettled([
+        searchUsers(normalizedQuery),
+        searchMovies(normalizedQuery),
+      ])
+        .then(([usersResult, moviesResult]) => {
           if (!active) return;
-          setUserSearchResults([]);
-          setUserSearchError(error?.message || 'No se pudo buscar usuarios.');
+
+          if (usersResult.status === 'fulfilled') {
+            setUserSearchResults(usersResult.value);
+          } else {
+            setUserSearchResults([]);
+            setUserSearchError(usersResult.reason?.message || 'No se pudo buscar usuarios.');
+          }
+
+          if (moviesResult.status === 'fulfilled') {
+            setMovieSearchResults(moviesResult.value);
+          } else {
+            setMovieSearchResults([]);
+            setMovieSearchError(moviesResult.reason?.message || 'No se pudo buscar películas.');
+          }
         })
         .finally(() => {
-          if (active) setUserSearchLoading(false);
+          if (active) setSearchLoading(false);
         });
     }, 300);
 
@@ -214,8 +235,9 @@ export const Social = () => {
     };
   }, [query, shouldLoadSocial]);
 
-  const displayName = getDisplayName(profile || sessionUser, isRegistered);
-  const avatarUrl = profile?.url_perfil || sessionUser?.url_perfil || '';
+  const profileFallback = isOwnProfile ? sessionUser : null;
+  const displayName = getDisplayName(profile || profileFallback, isRegistered);
+  const avatarUrl = profile?.url_perfil || profileFallback?.url_perfil || '';
   const ratedMoviesCount = ratedMovies.length || socialStatsData.totalMovies || socialStatsData.totalReviews;
   const bioText = getBioText(profile, isRegistered);
   const hasRealBio = Boolean(profile?.bio || profile?.descripcion || profile?.presentacion);
@@ -256,6 +278,11 @@ export const Social = () => {
   const displayedUserSearchResults = normalizedSearchQuery
     ? userSearchResults.filter((user) => String(user.username || '').toLowerCase().includes(normalizedSearchQuery))
     : userSearchResults;
+  const displayedMovieSearchResults = movieSearchResults.slice(0, 8);
+  const favoriteSlots = Array.from(
+    { length: 5 },
+    (_, index) => (loading ? null : favoriteMovies[index] || null)
+  );
 
   const handleImageFallback = (event) => {
     event.currentTarget.src = FALLBACK_POSTER;
@@ -268,6 +295,15 @@ export const Social = () => {
     setQuery('');
     setUserSearchResults([]);
     navigate(isSameUser(selectedUserId, userId) ? '/social' : `/social/${selectedUserId}`);
+  };
+
+  const handleSelectMovie = (movie) => {
+    if (!movie?.id) return;
+
+    setQuery('');
+    setUserSearchResults([]);
+    setMovieSearchResults([]);
+    navigate(`/social/pelicula/${movie.id}`, { state: { movie } });
   };
 
   const handleFollow = () => {
@@ -293,10 +329,10 @@ export const Social = () => {
   };
 
   return (
-    <div className="flex h-dvh min-h-0 flex-col overflow-hidden bg-[#020b16] text-white">
+    <div className="flex min-h-screen flex-col bg-[#020b16] text-white">
       <Header />
 
-      <main className="flex min-h-0 flex-1 flex-col overflow-hidden">
+      <main className="flex flex-1 flex-col">
         <section className="shrink-0 border-b border-sky-300/60 px-4 py-6 sm:px-6 lg:px-8">
           <div className="w-full">
             <div className="grid gap-6 lg:grid-cols-[1.2fr_0.8fr] lg:items-center">
@@ -318,12 +354,8 @@ export const Social = () => {
 
                 <div className="text-center sm:text-left">
                   <h1 className="text-3xl font-extrabold tracking-tight text-slate-100 sm:text-4xl">
-                    {displayName}
+                    @{displayName}
                   </h1>
-
-                  <p className="mt-1 text-sm font-medium text-white/55">
-                    {isRegistered ? profile?.username || profile?.correo || 'Perfil social' : 'Modo invitado'}
-                  </p>
 
                   {isOwnProfile ? (
                     <Link
@@ -358,45 +390,101 @@ export const Social = () => {
                       value={query}
                       onChange={(event) => setQuery(event.target.value)}
                       className="ml-3 min-w-0 flex-1 bg-transparent text-lg font-bold text-white outline-none placeholder:text-white/70"
-                      placeholder="Buscar username"
+                      placeholder="Buscar usuarios o películas"
                     />
                   </label>
 
                   {query.trim().length >= 2 && (
                     <div className="absolute right-0 z-30 mt-2 w-full overflow-hidden rounded-md border border-slate-700 bg-slate-950 shadow-2xl shadow-black/40">
-                      {userSearchLoading ? (
-                        <p className="px-4 py-3 text-sm font-semibold text-white/65">Buscando usuarios...</p>
-                      ) : userSearchError ? (
-                        <p className="px-4 py-3 text-sm font-semibold text-red-200">{userSearchError}</p>
-                      ) : displayedUserSearchResults.length > 0 ? (
-                        <div className="max-h-72 overflow-y-auto">
-                          {displayedUserSearchResults.map((user) => (
-                            <button
-                              key={user.id_usuario || user.id}
-                              type="button"
-                              onClick={() => handleSelectUser(user)}
-                              className="flex w-full items-center gap-3 border-b border-slate-800 px-4 py-3 text-left transition-colors last:border-b-0 hover:bg-slate-900"
-                            >
-                              <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-full bg-slate-800">
-                                {user.url_perfil ? (
-                                  <img
-                                    src={user.url_perfil}
-                                    alt={user.nombre || user.username || 'Usuario'}
-                                    className="h-full w-full object-cover"
-                                  />
-                                ) : (
-                                  <span className="text-sm font-black text-white/60">U</span>
-                                )}
-                              </div>
-                              <div className="min-w-0">
-                                <p className="truncate text-sm font-extrabold text-white">{user.username || 'Sin username'}</p>
-                                <p className="truncate text-xs font-semibold text-white/50">{user.nombre || user.correo || 'Perfil social'}</p>
-                              </div>
-                            </button>
-                          ))}
-                        </div>
+                      {searchLoading ? (
+                        <p className="px-4 py-3 text-sm font-semibold text-white/65">Buscando usuarios y películas...</p>
                       ) : (
-                        <p className="px-4 py-3 text-sm font-semibold text-white/65">Sin usuarios encontrados.</p>
+                        <div className="max-h-96 overflow-y-auto">
+                          {userSearchError && (
+                            <p className="border-b border-slate-800 px-4 py-3 text-sm font-semibold text-red-200">
+                              {userSearchError}
+                            </p>
+                          )}
+
+                          {movieSearchError && (
+                            <p className="border-b border-slate-800 px-4 py-3 text-sm font-semibold text-red-200">
+                              {movieSearchError}
+                            </p>
+                          )}
+
+                          {displayedUserSearchResults.length > 0 && (
+                            <section>
+                              <p className="border-b border-slate-800 bg-slate-900/80 px-4 py-2 text-xs font-black uppercase tracking-wider text-sky-200">
+                                Usuarios
+                              </p>
+                              {displayedUserSearchResults.slice(0, 6).map((user) => (
+                                <button
+                                  key={user.id_usuario || user.id}
+                                  type="button"
+                                  onClick={() => handleSelectUser(user)}
+                                  className="flex w-full items-center gap-3 border-b border-slate-800 px-4 py-3 text-left transition-colors hover:bg-slate-900"
+                                >
+                                  <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-full bg-slate-800">
+                                    {user.url_perfil ? (
+                                      <img
+                                        src={user.url_perfil}
+                                        alt={user.username || 'Usuario'}
+                                        className="h-full w-full object-cover"
+                                      />
+                                    ) : (
+                                      <span className="text-sm font-black text-white/60">U</span>
+                                    )}
+                                  </div>
+                                  <p className="min-w-0 truncate text-sm font-extrabold text-white">
+                                    @{user.username || 'sin-username'}
+                                  </p>
+                                </button>
+                              ))}
+                            </section>
+                          )}
+
+                          {displayedMovieSearchResults.length > 0 && (
+                            <section>
+                              <p className="border-b border-slate-800 bg-slate-900/80 px-4 py-2 text-xs font-black uppercase tracking-wider text-sky-200">
+                                Películas
+                              </p>
+                              {displayedMovieSearchResults.map((movie) => (
+                                <button
+                                  key={movie.id}
+                                  type="button"
+                                  onClick={() => handleSelectMovie(movie)}
+                                  className="flex w-full items-center gap-3 border-b border-slate-800 px-4 py-3 text-left transition-colors last:border-b-0 hover:bg-slate-900"
+                                >
+                                  <div className="flex h-14 w-10 shrink-0 items-center justify-center overflow-hidden rounded bg-slate-800">
+                                    {movie.imagenPoster ? (
+                                      <img
+                                        src={movie.imagenPoster}
+                                        alt={movie.titulo}
+                                        className="h-full w-full object-cover"
+                                        onError={handleImageFallback}
+                                      />
+                                    ) : (
+                                      <Film className="h-5 w-5 text-white/50" />
+                                    )}
+                                  </div>
+                                  <div className="min-w-0">
+                                    <p className="truncate text-sm font-extrabold text-white">{movie.titulo}</p>
+                                    <p className="truncate text-xs font-semibold text-white/50">
+                                      {[movie.genero, movie.duracion].filter(Boolean).join(' · ')}
+                                    </p>
+                                  </div>
+                                </button>
+                              ))}
+                            </section>
+                          )}
+
+                          {!userSearchError &&
+                            !movieSearchError &&
+                            displayedUserSearchResults.length === 0 &&
+                            displayedMovieSearchResults.length === 0 && (
+                              <p className="px-4 py-3 text-sm font-semibold text-white/65">Sin resultados encontrados.</p>
+                            )}
+                        </div>
                       )}
                     </div>
                   )}
@@ -430,8 +518,9 @@ export const Social = () => {
               <button
                 key={tab}
                 type="button"
+                aria-current={tab === 'Perfil' ? 'page' : undefined}
                 className={`border-x border-slate-800 py-4 text-base font-extrabold transition-colors sm:text-lg ${
-                  tab === 'Películas' ? 'text-slate-100' : 'text-white/50 hover:text-white/80'
+                  tab === 'Perfil' ? 'text-slate-100' : 'text-white/50 hover:text-white/80'
                 }`}
               >
                 {tab}
@@ -440,8 +529,8 @@ export const Social = () => {
           </div>
         </section>
 
-        <section className="flex min-h-0 flex-1 overflow-hidden px-4 py-8 sm:px-6 lg:px-8">
-          <div className="grid min-h-0 w-full gap-8 lg:grid-cols-[minmax(300px,0.32fr)_1fr]">
+        <section className="flex flex-1 px-4 py-8 sm:px-6 lg:px-8">
+          <div className="grid w-full items-start gap-8 lg:grid-cols-[minmax(300px,0.32fr)_1fr]">
             <aside className="space-y-7">
               <div>
                 <h2 className="text-2xl font-bold text-white">Bio</h2>
@@ -491,24 +580,15 @@ export const Social = () => {
               </div>
             </aside>
 
-            <div className="flex min-h-0 flex-col">
+            <div className="flex min-w-0 flex-col">
               <h2 className="mb-5 text-3xl font-extrabold text-slate-100">Películas Favoritas</h2>
 
-              {loading ? (
-                <div className="grid flex-1 grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-5">
-                  {Array.from({ length: 5 }).map((_, index) => (
-                    <div
-                      key={index}
-                      className="min-h-[280px] animate-pulse rounded-md border border-slate-800 bg-slate-800/70"
-                    />
-                  ))}
-                </div>
-              ) : favoriteMovies.length > 0 ? (
-                <div className="grid flex-1 grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-5">
-                  {favoriteMovies.map((movie) => (
+              <div className="grid grid-cols-2 items-start gap-3 sm:grid-cols-3 sm:gap-4 xl:grid-cols-4 2xl:grid-cols-5">
+                {favoriteSlots.map((movie, index) => (
+                  movie ? (
                     <article
-                      key={movie.id}
-                      className="group min-h-[280px] overflow-hidden rounded-md border border-slate-800 bg-slate-900 shadow-xl shadow-black/25 transition-transform hover:-translate-y-1 hover:shadow-2xl"
+                      key={`favorite-${movie.id}`}
+                      className="group aspect-[2/3] w-full overflow-hidden rounded-md border border-slate-800 bg-slate-900 shadow-xl shadow-black/25 transition-transform hover:-translate-y-1 hover:shadow-2xl"
                       title={movie.titulo}
                     >
                       <img
@@ -518,19 +598,17 @@ export const Social = () => {
                         onError={handleImageFallback}
                       />
                     </article>
-                  ))}
-                </div>
-              ) : (
-                <div className="flex flex-1 items-center justify-center rounded-md border border-dashed border-slate-700 bg-slate-900/40 px-6 py-12 text-center">
-                  <p className="max-w-md text-base font-semibold text-white/65">
-                    {query
-                      ? 'Usa el buscador superior para encontrar usuarios.'
-                      : isRegistered
-                        ? 'Aún no tienes películas favoritas registradas.'
-                        : 'Inicia sesión para ver tus películas favoritas.'}
-                  </p>
-                </div>
-              )}
+                  ) : (
+                    <div
+                      key={`favorite-skeleton-${index}`}
+                      className="aspect-[2/3] w-full overflow-hidden rounded-md border border-slate-800 bg-gradient-to-br from-slate-800/90 via-slate-900 to-slate-800/70"
+                      aria-label={loading ? 'Cargando película favorita' : 'Espacio de película favorita disponible'}
+                    >
+                      <div className="h-full w-full bg-[linear-gradient(110deg,transparent_25%,rgba(255,255,255,0.04)_45%,transparent_65%)]" />
+                    </div>
+                  )
+                ))}
+              </div>
             </div>
           </div>
         </section>

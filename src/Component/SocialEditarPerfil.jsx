@@ -235,13 +235,16 @@ export const SocialEditarPerfil = () => {
   };
 
   const applyMovieSelection = () => {
-    setSelectedMovieIds(draftMovieIds);
+    setSelectedMovieIds([...draftMovieIds]);
+    setFavoriteMovies(draftMovieIds.map((id) => moviesById.get(id)).filter(Boolean));
     setModalOpen(false);
     setSuccess('');
   };
 
   const removeFavoriteSlot = (movieId) => {
     setSelectedMovieIds((current) => current.filter((id) => id !== movieId));
+    setDraftMovieIds((current) => current.filter((id) => id !== movieId));
+    setFavoriteMovies((current) => current.filter((movie) => movie.id !== movieId));
     setSuccess('');
   };
 
@@ -303,7 +306,7 @@ export const SocialEditarPerfil = () => {
   };
 
   const avatarPreview = form.url_perfil.trim();
-  const displayName = profile?.nombre || sessionUser?.nombre || 'Usuario';
+  const displayName = profile?.username || sessionUser?.username || 'usuario';
 
   return (
     <div className="flex min-h-screen flex-col bg-[#020b16] text-white">
@@ -472,7 +475,7 @@ export const SocialEditarPerfil = () => {
 
                     return (
                       <div
-                        key={movie?.id || index}
+                        key={`favorite-slot-${index}`}
                         className="relative aspect-[2/3] overflow-hidden rounded-md border border-slate-800 bg-slate-950"
                       >
                         {movie ? (
@@ -495,8 +498,11 @@ export const SocialEditarPerfil = () => {
                             </button>
                           </>
                         ) : (
-                          <div className="flex h-full items-center justify-center border border-dashed border-slate-700 text-sm font-bold text-white/35">
-                            Vacío
+                          <div
+                            className="h-full w-full bg-gradient-to-br from-slate-800/90 via-slate-900 to-slate-800/70"
+                            aria-label="Espacio de película favorita disponible"
+                          >
+                            <div className="h-full w-full bg-[linear-gradient(110deg,transparent_25%,rgba(255,255,255,0.04)_45%,transparent_65%)]" />
                           </div>
                         )}
                       </div>
