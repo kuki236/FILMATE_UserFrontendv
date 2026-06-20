@@ -186,14 +186,20 @@ export function normalizeMovie(movie) {
     directorsFromRelations.join(', ') ||
     (typeof movie.directores === 'string' ? movie.directores : '') ||
     'Por definir';
+  const ratingValue = movie.promedio_resenas ?? movie.rating;
+  const normalizedRating = ratingValue === undefined || ratingValue === null
+    ? (((movie.id_pelicula || movie.id || 0) % 5) + 1)
+    : Math.round((Number(ratingValue) || 0) * 2) / 2;
 
   return {
     id: movie.id_pelicula || movie.id,
     titulo: movie.titulo,
+    anio: movie.anio_lanzamiento || movie.anio || null,
     genero: movie.genero || generos.join(', ') || 'Cartelera',
     duracion: formatDuration(movie.duracion_minutos),
     clasificacion: movie.clasificacion || movie.clasificacion_edad || 'APT',
-    rating: Math.round(movie.promedio_resenas || movie.rating || ((movie.id_pelicula % 5) + 1)),
+    rating: normalizedRating,
+    totalResenas: Number(movie.total_resenas || movie.totalResenas || 0),
     imagenPoster: movie.url_poster || '',
     imagenTrailer: movie.url_banner || movie.url_trailer || movie.url_poster || '',
     trailerUrl: movie.url_trailer || '',
@@ -201,7 +207,7 @@ export function normalizeMovie(movie) {
     sinopsis: movie.sinopsis || 'Sinopsis próxima a actualizar.',
     director: directorText,
     directores: directorsFromRelations,
-    reparto: movie.reparto || actorsFromRelations.join(', ') || 'Por definir',
+    reparto: reparto.join(', ') || 'Por definir',
     estreno: movie.categoria_cartelera === 'Estreno',
     categoriaCartelera: movie.categoria_cartelera,
     estadoRegistro: movie.estado_registro,
@@ -398,6 +404,18 @@ export async function searchMovies(query) {
 export async function getMovieById(movieId) {
   const data = await request(`/client/movies/${movieId}/details`);
   return normalizeMovie(data);
+}
+
+export async function createMovieReview(payload) {
+  return request('/client/reviews/', {
+    method: 'POST',
+    body: JSON.stringify({
+      id_usuario: payload.id_usuario,
+      id_pelicula: payload.id_pelicula,
+      puntuacion_estrellas: payload.puntuacion_estrellas,
+      comentario: payload.comentario,
+    }),
+  });
 }
 
 export async function getCinemas() {

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { LogOut, Menu, X } from 'lucide-react';
 import { Link, useNavigate, useLocation } from "react-router-dom";
 import { clearAuthSession, isRegisteredSession } from './authSession';
@@ -9,7 +9,11 @@ export const Header = () => {
   const navigate = useNavigate();
   const location = useLocation();
 
-  const isActive = (path) => location.pathname === path;
+  const isActive = (path) => {
+    if (path === '/social') return location.pathname.startsWith('/social');
+    if (path === '/menuPrincipal') return location.pathname.startsWith('/menuPrincipal');
+    return location.pathname === path;
+  };
 
   const handleLogout = () => {
     console.log('Cerrando sesión...');
