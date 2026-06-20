@@ -3,7 +3,7 @@ import { AlertTriangle, ArrowLeft, ArrowRight, Clock3, Clapperboard, Star, Play,
 import Header from './Header.jsx';
 import Footer from './Footer.jsx';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
-import { createSeatWebSocket, getMovieById, getSeatMap, getShowtimesByDate, normalizeSeat } from './filmateApi';
+import { createSeatWebSocket, getMovieById, getRoomById, getSeatMap, getShowtimesByDate, normalizeSeat } from './filmateApi';
 
 const FALLBACK_MEDIA_IMAGE =
     "data:image/svg+xml;charset=UTF-8," +
@@ -129,6 +129,41 @@ const getCinemaByRoomId = (roomId) => {
     return { id: `sala-${roomId || 'sin-sede'}`, nombre: 'Sede por definir' };
 };
 
+const normalizeRoomType = (value) => {
+    const normalized = String(value || '').trim();
+    if (!normalized) return '';
+    if (/^stand\.?$/i.test(normalized) || /^est[aá]ndar$/i.test(normalized)) return 'Estándar';
+    return normalized.toUpperCase();
+};
+
+const getShowFormat = (showtime) => {
+    const room = showtime?.room || showtime?.salaDetalle || {};
+    const format = String(
+        showtime?.tipo_formato ||
+        showtime?.tipoFormato ||
+        room?.tipo_formato ||
+        room?.tipoFormato ||
+        ''
+    ).trim().toUpperCase();
+    const roomType = normalizeRoomType(
+        showtime?.tipo_sala ||
+        showtime?.tipoSala ||
+        room?.tipo_sala ||
+        room?.tipoSala
+    );
+
+    if (format && roomType && roomType !== 'Estándar' && roomType !== format) {
+        return `${roomType} · ${format}`;
+    }
+
+    if (format) return format;
+    if (roomType) return roomType;
+
+    const roomName = String(showtime?.nombre_sala || showtime?.sala || '');
+    const inferred = roomName.match(/\b(IMAX|4DX|VIP|3D|2D|EST[ÁA]NDAR)\b/i)?.[1];
+    return normalizeRoomType(inferred) || 'Sala estándar';
+};
+
 const SeatGlyph = ({
     seatSize = 36,
     seatNumber = '',
@@ -187,9 +222,8 @@ export const DetallePelicula = () => {
     const [movieError, setMovieError] = useState('');
     const location = useLocation();
     const navigate = useNavigate();
-    const seatMapScrollRef = useRef(null);
-    const seatRowScrollRefs = useRef({});
-    const seatSizes = useRef({});
+    const seatGridRef = useRef(null);
+    const [seatGridWidth, setSeatGridWidth] = useState(0);
     const loadedSeatMapFunctionIdRef = useRef(null);
 
     const pelicula = movieDetails || location.state?.movieState || location.state;
@@ -399,25 +433,16 @@ export const DetallePelicula = () => {
     }, [selectedShow?.id_funcion]);
 
     useEffect(() => {
-        if (!selectedShow) return;
+        const container = seatGridRef.current;
+        if (!container || typeof ResizeObserver === 'undefined') return undefined;
 
-        const restoreScroll = () => {
-            const container = seatMapScrollRef.current;
-            if (!container) return;
+        const observer = new ResizeObserver(([entry]) => {
+            if (entry) setSeatGridWidth(entry.contentRect.width);
+        });
+        observer.observe(container);
 
-            const currentTop = seatSizes.current.__scrollTop ?? container.scrollTop;
-            container.scrollTop = currentTop;
-
-            const rowScrolls = seatSizes.current.__rowScrolls || {};
-            Object.entries(seatRowScrollRefs.current).forEach(([row, node]) => {
-                if (!node) return;
-                node.scrollLeft = rowScrolls[row] ?? node.scrollLeft;
-            });
-        };
-
-        const raf = window.requestAnimationFrame(restoreScroll);
-        return () => window.cancelAnimationFrame(raf);
-    }, [selectedSeats, selectedShow]);
+        return () => observer.disconnect();
+    }, [selectedShow, seatMap.length]);
 
     if (movieLoading && !movieDetails && !location.state) {
         return (
@@ -599,9 +624,32 @@ export const DetallePelicula = () => {
 
         try {
             setSeatMapLoading(true);
-            const response = await getSeatMap(showtime.id_funcion);
-            setSeatMap(Array.isArray(response?.asientos) ? response.asientos : []);
+            const [seatResult, roomResult] = await Promise.allSettled([
+                getSeatMap(showtime.id_funcion),
+                showtime.id_sala ? getRoomById(showtime.id_sala) : Promise.resolve(null),
+            ]);
+
+            if (seatResult.status === 'rejected') {
+                throw seatResult.reason;
+            }
+
+            setSeatMap(Array.isArray(seatResult.value?.asientos) ? seatResult.value.asientos : []);
             loadedSeatMapFunctionIdRef.current = showtime.id_funcion;
+
+            if (roomResult.status === 'fulfilled' && roomResult.value) {
+                const room = roomResult.value;
+                setSelectedShow((current) => {
+                    if (!current || current.id_funcion !== showtime.id_funcion) return current;
+
+                    return {
+                        ...current,
+                        room,
+                        nombre_sala: room.nombre,
+                        tipo_sala: room.tipoSala,
+                        tipo_formato: room.tipoFormato,
+                    };
+                });
+            }
         } catch (err) {
             console.error('Error cargando mapa de asientos:', err);
             setSeatMapError('No se pudo cargar el mapa de asientos real.');
@@ -638,6 +686,7 @@ export const DetallePelicula = () => {
                 horario: formatShowtimeDateTime(selectedShow, selectedShowtimeDateKey),
                 fecha_funcion: selectedShowtimeDateKey,
                 sala: selectedShow?.nombre_sala || selectedShow?.sala,
+                formato: getShowFormat(selectedShow),
                 id_funcion: selectedShow?.id_funcion,
                 precio_base: Number(selectedShow?.precio_base || 0),
                 asientos: selectedSeats.map((seat) => `${seat.fila}${getSeatNumber(seat)}`),
@@ -668,6 +717,11 @@ export const DetallePelicula = () => {
         return acc;
     }, {});
     const backendSeatRows = Object.entries(seatMapByRow).sort(([a], [b]) => a.localeCompare(b, 'es', { numeric: true }));
+    const maxSeatsInRow = Math.max(1, ...backendSeatRows.map(([, seats]) => seats.length));
+    const seatGap = maxSeatsInRow > 20 ? 1 : maxSeatsInRow > 14 ? 2 : seatGridWidth < 520 ? 3 : 6;
+    const seatLabelWidth = seatGridWidth < 520 ? 22 : 30;
+    const availableSeatWidth = Math.max(0, seatGridWidth - seatLabelWidth - (seatGap * (maxSeatsInRow - 1)) - 12);
+    const responsiveSeatSize = Math.max(7, Math.min(50, Math.floor(availableSeatWidth / maxSeatsInRow) || 28));
 
     const renderSeat = (seat, seatSize = 36) => {
         const seatNumber = getSeatNumber(seat);
@@ -687,7 +741,7 @@ export const DetallePelicula = () => {
                 aria-label={`Asiento ${seat.fila}${seatNumber}, ${seat.estado ?? 'Disponible'}`}
                 title={`${seat.fila}${seatNumber} - ${seat.estado ?? 'Disponible'}`}
                 className={[
-                    'flex flex-col items-center gap-1 bg-transparent border-none p-0',
+                    'flex min-w-0 items-center justify-center bg-transparent border-none p-0',
                     'transition-transform duration-100 focus-visible:outline focus-visible:outline-2',
                     'focus-visible:outline-offset-2 focus-visible:outline-teal-500 focus-visible:rounded',
                     !unavailable && 'cursor-pointer hover:-translate-y-0.5 active:scale-95',
@@ -701,10 +755,6 @@ export const DetallePelicula = () => {
                   Apoyabrazos a los lados del cojín.
                 */}
                 <SeatGlyph seatSize={seatSize} seatNumber={seat.numero} selected={selected} unavailable={unavailable} />
-
-                <span className="text-[10px] font-semibold uppercase tracking-widest text-neutral-400">
-                    {seat.fila}
-                </span>
             </button>
         );
     };
@@ -801,13 +851,7 @@ export const DetallePelicula = () => {
                         </div>
                     </div>
 
-                    <div
-                        ref={seatMapScrollRef}
-                        onScroll={(e) => {
-                            seatSizes.current.__scrollTop = e.currentTarget.scrollTop;
-                        }}
-                        className="flex-1 min-h-0 overflow-y-auto px-3 py-3 sm:px-6 sm:py-6 lg:px-8"
-                    >
+                    <div className="flex-1 min-h-0 overflow-y-auto px-3 py-3 sm:px-6 sm:py-6 lg:px-8">
                         <div className="mx-auto w-full max-w-7xl pb-8">
                             <div className="grid gap-4 lg:grid-cols-[340px_1fr] lg:gap-6 lg:items-start">
                             <aside className="max-h-[calc(100vh-10rem)] overflow-y-auto rounded-[1.5rem] border border-slate-700/60 bg-[#061321] p-3 shadow-2xl shadow-black/30 sm:rounded-[2rem] sm:p-5 lg:sticky lg:top-4">
@@ -819,12 +863,12 @@ export const DetallePelicula = () => {
                                     />
                                 </div>
 
-                                <h3 className="mx-auto mt-3 w-full max-w-none px-2 text-center text-[clamp(1.15rem,5vw,2rem)] font-black uppercase leading-[0.98] tracking-tight text-transparent break-words whitespace-normal [text-shadow:2px_2px_0_#ff2b50] sm:mt-5 sm:text-[clamp(1.35rem,3vw,2.6rem)] lg:text-[clamp(1.5rem,2vw,2.9rem)]">
+                                <h3 className="mx-auto mt-3 w-full max-w-none px-2 text-center text-[clamp(1rem,4.5vw,2rem)] font-black uppercase leading-[0.98] tracking-tight text-transparent whitespace-normal break-normal [overflow-wrap:normal] [word-break:normal] [hyphens:none] [text-wrap:balance] [text-shadow:2px_2px_0_#ff2b50] sm:mt-5 sm:text-[clamp(1.2rem,2.7vw,2.4rem)] lg:text-[clamp(1.15rem,1.8vw,2.35rem)]">
                                     {titulo}
                                 </h3>
 
                                 <p className="mt-2 text-center text-sm font-bold text-[#5fa6ff] sm:mt-6 sm:text-2xl">
-                                    {selectedShow.formato || 'Formato por definir'}
+                                    {getShowFormat(selectedShow)}
                                     {selectedShow.idioma ? `, ${selectedShow.idioma}` : ''}
                                 </p>
 
@@ -883,7 +927,7 @@ export const DetallePelicula = () => {
                                 </div>
                             </aside>
 
-                            <section className="overflow-hidden rounded-[1.5rem] border border-slate-700/60 bg-[#061321] p-3 shadow-2xl shadow-black/30 sm:rounded-[2rem] sm:p-6">
+                            <section ref={seatGridRef} className="overflow-hidden rounded-[1.5rem] border border-slate-700/60 bg-[#061321] p-3 shadow-2xl shadow-black/30 sm:rounded-[2rem] sm:p-6">
                                 <div className="mb-4 text-center sm:mb-5">
                                     <div className="mx-auto h-6 w-full rounded-full bg-sky-200/90 text-center text-[0.75rem] font-black uppercase tracking-[0.22em] text-slate-600 sm:h-8 sm:text-2xl sm:tracking-[0.7em]">
                                         Pantalla
@@ -910,37 +954,31 @@ export const DetallePelicula = () => {
                                             </span>
                                         </div>
                                         {backendSeatRows.map(([row, seats]) => {
-                                            const viewportWidth = typeof window !== 'undefined' ? window.innerWidth : 1024;
-                                            const seatSize = Math.max(28, Math.min(56, Math.floor((viewportWidth - 140) / Math.max(seats.length, 1))));
+                                            const sortedSeats = seats
+                                                .slice()
+                                                .sort((a, b) => Number(getSeatNumber(a)) - Number(getSeatNumber(b)));
 
                                             return (
-                                            <div key={row} className="grid grid-cols-[1.35rem_minmax(0,1fr)_1.35rem] items-center gap-1 sm:grid-cols-[32px_minmax(0,1fr)_32px] sm:gap-2">
-                                                <div className="text-center text-[0.65rem] font-black uppercase tracking-[0.2em] text-[#7fb0ff] sm:text-2xl sm:tracking-[0.35em]">
+                                            <div
+                                                key={row}
+                                                className="grid min-w-0 items-center"
+                                                style={{
+                                                    gridTemplateColumns: `${seatLabelWidth}px minmax(0, 1fr)`,
+                                                    columnGap: `${seatGap}px`,
+                                                }}
+                                            >
+                                                <div className="relative z-10 text-center text-[0.65rem] font-black uppercase text-[#7fb0ff] sm:text-lg">
                                                     {row}
                                                 </div>
 
                                                 <div
-                                                    ref={(node) => {
-                                                        if (node) {
-                                                            seatRowScrollRefs.current[row] = node;
-                                                        } else {
-                                                            delete seatRowScrollRefs.current[row];
-                                                        }
+                                                    className="grid min-w-0 items-center"
+                                                    style={{
+                                                        gridTemplateColumns: `repeat(${sortedSeats.length}, minmax(0, 1fr))`,
+                                                        columnGap: `${seatGap}px`,
                                                     }}
-                                                    onScroll={(e) => {
-                                                        seatSizes.current.__rowScrolls = seatSizes.current.__rowScrolls || {};
-                                                        seatSizes.current.__rowScrolls[row] = e.currentTarget.scrollLeft;
-                                                    }}
-                                                    className="flex min-w-0 flex-nowrap items-center justify-start gap-1 overflow-x-auto overflow-y-hidden px-1 pb-1 sm:justify-center sm:gap-2 sm:overflow-visible sm:px-0 sm:pb-0"
                                                 >
-                                                    {seats
-                                                        .slice()
-                                                        .sort((a, b) => Number(getSeatNumber(a)) - Number(getSeatNumber(b)))
-                                                        .map((seat) => renderSeat(seat, seatSize))}
-                                                </div>
-
-                                                <div className="text-center text-[0.65rem] font-black uppercase tracking-[0.2em] text-[#7fb0ff] sm:text-2xl sm:tracking-[0.35em]">
-                                                    {row}
+                                                    {sortedSeats.map((seat) => renderSeat(seat, responsiveSeatSize))}
                                                 </div>
                                             </div>
                                             );
@@ -964,6 +1002,64 @@ export const DetallePelicula = () => {
             </div>
         );
     };
+
+    const renderTrailerPanel = () => (
+        <div className="overflow-hidden rounded-3xl border border-slate-700/50 bg-slate-800/30 backdrop-blur-sm">
+            <div className="relative">
+                {showTrailer && videoId ? (
+                    <>
+                        <iframe
+                            key={`trailer-${videoId}`}
+                            className="h-[280px] w-full sm:h-[400px]"
+                            src={`https://www.youtube.com/embed/${videoId}?autoplay=1&playsinline=1&rel=0`}
+                            title={`Tráiler de ${titulo}`}
+                            frameBorder="0"
+                            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                            allowFullScreen
+                        />
+                        <button
+                            type="button"
+                            onClick={() => setShowTrailer(false)}
+                            className="absolute right-3 top-3 rounded-full bg-black/70 px-3 py-2 text-xs font-semibold text-white backdrop-blur-sm transition-colors hover:bg-black/90 sm:right-4 sm:top-4 sm:px-4 sm:text-sm"
+                        >
+                            Cerrar tráiler
+                        </button>
+                        {trailerUrl && (
+                            <a
+                                href={trailerUrl}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="absolute bottom-3 left-3 rounded-full bg-black/60 px-3 py-2 text-xs font-semibold text-white backdrop-blur-sm transition-colors hover:bg-black/80 sm:bottom-4 sm:left-4 sm:px-4 sm:text-sm"
+                            >
+                                Abrir en YouTube
+                            </a>
+                        )}
+                    </>
+                ) : (
+                    <button
+                        type="button"
+                        onClick={() => videoId && setShowTrailer(true)}
+                        className="group relative block w-full"
+                    >
+                        <img
+                            src={trailerPreview}
+                            alt="Vista previa del tráiler"
+                            className="h-[280px] w-full object-cover sm:h-[400px]"
+                            onError={handleImageFallback}
+                        />
+                        <div className="absolute inset-0 flex items-center justify-center bg-black/40">
+                            <div className="text-center">
+                                <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full border-4 border-white transition-transform group-hover:scale-110 sm:h-20 sm:w-20">
+                                    <Play className="ml-1 h-8 w-8 fill-white text-white sm:h-10 sm:w-10" />
+                                </div>
+                                <h3 className="text-xl font-bold text-white sm:text-2xl">{textoTrailer}</h3>
+                            </div>
+                        </div>
+                    </button>
+                )}
+            </div>
+        </div>
+    );
 
     return (
         <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 flex flex-col">
@@ -992,7 +1088,7 @@ export const DetallePelicula = () => {
                         <div className="bg-slate-800/30 backdrop-blur-sm rounded-3xl overflow-hidden border border-slate-700/50">
                             <img src={poster} alt={titulo} className="w-full h-[600px] object-cover" onError={handleImageFallback} />
                             <div className="p-6 text-center">
-                                <h2 className="mb-2 break-words px-1 text-center text-[clamp(1.4rem,5vw,2.2rem)] font-bold leading-tight text-white sm:text-[clamp(1.7rem,3vw,2.8rem)] lg:text-[clamp(1.8rem,1.7vw,3rem)]">
+                                <h2 className="mb-2 px-1 text-center text-[clamp(1.2rem,4.5vw,2.2rem)] font-bold leading-tight text-white whitespace-normal break-normal [overflow-wrap:normal] [word-break:normal] [hyphens:none] [text-wrap:balance] sm:text-[clamp(1.5rem,2.8vw,2.6rem)] lg:text-[clamp(1.35rem,1.55vw,2.6rem)]">
                                     {titulo}
                                 </h2>
                                 <div className="mb-4 flex flex-wrap justify-center gap-2">
@@ -1036,65 +1132,14 @@ export const DetallePelicula = () => {
                     </div>
 
                     {/* Columna Derecha */}
-                    <div className="lg:col-span-2 space-y-6 order-2">
+                    <div className="order-2 flex flex-col gap-6 lg:col-span-2">
 
-                        {/* Trailer desktop */}
-                        <div className="bg-slate-800/30 backdrop-blur-sm rounded-3xl overflow-hidden border border-slate-700/50 hidden lg:block">
-                            <div className="relative">
-                                {showTrailer && videoId ? (
-                                    <>
-                                        <iframe
-                                            className="h-[400px] w-full"
-                                            src={`https://www.youtube.com/embed/${videoId}?autoplay=1`}
-                                            title="YouTube video player"
-                                            frameBorder="0"
-                                            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                                            allowFullScreen
-                                        />
-                                        <button
-                                            onClick={() => setShowTrailer(false)}
-                                            className="absolute right-4 top-4 rounded-full bg-black/70 px-4 py-2 text-sm font-semibold text-white backdrop-blur-sm transition-colors hover:bg-black/90"
-                                        >
-                                            Cerrar tráiler
-                                        </button>
-                                        {trailerUrl && (
-                                            <a
-                                                href={trailerUrl}
-                                                target="_blank"
-                                                rel="noreferrer"
-                                                className="absolute bottom-4 left-4 rounded-full bg-black/60 px-4 py-2 text-sm font-semibold text-white backdrop-blur-sm transition-colors hover:bg-black/80"
-                                            >
-                                                Abrir en YouTube
-                                            </a>
-                                        )}
-                                    </>
-                                ) : (
-                                    <button
-                                        type="button"
-                                        onClick={() => videoId && setShowTrailer(true)}
-                                        className="group relative block w-full"
-                                    >
-                                        <img
-                                            src={trailerPreview}
-                                            alt="Vista previa del tráiler"
-                                            className="h-[400px] w-full object-cover"
-                                            onError={handleImageFallback}
-                                        />
-                                        <div className="absolute inset-0 flex items-center justify-center bg-black/40">
-                                            <div className="text-center">
-                                                <div className="mx-auto mb-4 flex h-20 w-20 items-center justify-center rounded-full border-4 border-white transition-transform group-hover:scale-110">
-                                                    <Play className="ml-1 h-10 w-10 fill-white text-white" />
-                                                </div>
-                                                <h3 className="text-2xl font-bold text-white">{textoTrailer}</h3>
-                                            </div>
-                                        </div>
-                                    </button>
-                                )}
-                            </div>
+                        <div className="order-2 lg:order-1">
+                            {renderTrailerPanel()}
                         </div>
 
                         {/* Horarios */}
-                        <div className="space-y-4">
+                        <div className="order-1 space-y-4 lg:order-2">
                             {showtimesLoading ? (
                                 <div className="rounded-3xl border border-slate-700/50 bg-slate-800/30 p-6 text-slate-300">
                                     Cargando horarios reales...
@@ -1148,69 +1193,14 @@ export const DetallePelicula = () => {
                             )}
                         </div>
 
-                        {/* Trailer móvil */}
-                        <div className="bg-slate-800/30 backdrop-blur-sm rounded-3xl overflow-hidden border border-slate-700/50 lg:hidden">
-                            <div className="relative">
-                                {showTrailer && videoId ? (
-                                    <>
-                                        <iframe
-                                            className="h-[400px] w-full"
-                                            src={`https://www.youtube.com/embed/${videoId}?autoplay=1`}
-                                            title="YouTube video player"
-                                            frameBorder="0"
-                                            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                                            allowFullScreen
-                                        />
-                                        <button
-                                            onClick={() => setShowTrailer(false)}
-                                            className="absolute right-3 top-3 rounded-full bg-black/70 px-3 py-2 text-xs font-semibold text-white backdrop-blur-sm transition-colors hover:bg-black/90"
-                                        >
-                                            Cerrar
-                                        </button>
-                                        {trailerUrl && (
-                                            <a
-                                                href={trailerUrl}
-                                                target="_blank"
-                                                rel="noreferrer"
-                                                className="absolute bottom-3 left-3 rounded-full bg-black/60 px-3 py-2 text-xs font-semibold text-white backdrop-blur-sm transition-colors hover:bg-black/80"
-                                            >
-                                                YouTube
-                                            </a>
-                                        )}
-                                    </>
-                                ) : (
-                                    <button
-                                        type="button"
-                                        onClick={() => videoId && setShowTrailer(true)}
-                                        className="group relative block w-full"
-                                    >
-                                        <img
-                                            src={trailerPreview}
-                                            alt="Vista previa del tráiler"
-                                            className="h-[400px] w-full object-cover"
-                                            onError={handleImageFallback}
-                                        />
-                                        <div className="absolute inset-0 flex items-center justify-center bg-black/40">
-                                            <div className="text-center">
-                                                <div className="mx-auto mb-4 flex h-20 w-20 items-center justify-center rounded-full border-4 border-white transition-transform group-hover:scale-110">
-                                                    <Play className="ml-1 h-10 w-10 fill-white text-white" />
-                                                </div>
-                                                <h3 className="text-2xl font-bold text-white">{textoTrailer}</h3>
-                                            </div>
-                                        </div>
-                                    </button>
-                                )}
-                            </div>
-                        </div>
-
                         {/* Sinopsis */}
-                        <div className="bg-slate-800/30 backdrop-blur-sm rounded-3xl p-6 border border-slate-700/50">
+                        <div className="order-3 bg-slate-800/30 backdrop-blur-sm rounded-3xl p-6 border border-slate-700/50">
                             <h3 className="text-white text-2xl font-bold mb-4">Sinopsis</h3>
                             <p className="text-gray-300">{sinopsis}</p>
                         </div>
 
                         {/* Director */}
-                        <div className="bg-slate-800/30 backdrop-blur-sm rounded-3xl p-6 border border-slate-700/50">
+                        <div className="order-3 bg-slate-800/30 backdrop-blur-sm rounded-3xl p-6 border border-slate-700/50">
                             <h3 className="text-white text-2xl font-bold mb-4">Director</h3>
                             <div className="flex flex-wrap gap-2">
                                 {directores.length ? directores.map((item) => (
@@ -1229,7 +1219,7 @@ export const DetallePelicula = () => {
                         </div>
 
                         {/* Reparto */}
-                        <div className="bg-slate-800/30 backdrop-blur-sm rounded-3xl p-6 border border-slate-700/50">
+                        <div className="order-3 bg-slate-800/30 backdrop-blur-sm rounded-3xl p-6 border border-slate-700/50">
                             <h3 className="text-white text-2xl font-bold mb-4">Reparto</h3>
                             <div className="flex flex-wrap gap-2">
                                 {repartoLista.map((item) => (
@@ -1244,7 +1234,7 @@ export const DetallePelicula = () => {
                         </div>
 
                         {/* Reseñas móvil */}
-                        <div className="space-y-4 lg:hidden">
+                        <div className="order-3 space-y-4 lg:hidden">
                             {resenas.slice(0, 3).map((resena) => (
                                 <div key={resena.id} className="bg-slate-800/30 backdrop-blur-sm rounded-3xl p-5 border border-slate-700/50">
                                     <div className="flex items-start gap-3 mb-3">
@@ -1263,7 +1253,7 @@ export const DetallePelicula = () => {
 
                         <button
                             onClick={() => setShowAllReviews(true)}
-                            className="w-full bg-red-500 hover:bg-red-600 text-white font-bold py-4 rounded-full transition-all duration-300 shadow-lg hover:scale-105 text-xl lg:hidden"
+                            className="order-3 w-full bg-red-500 hover:bg-red-600 text-white font-bold py-4 rounded-full transition-all duration-300 shadow-lg hover:scale-105 text-xl lg:hidden"
                         >
                             Leer más reseñas
                         </button>

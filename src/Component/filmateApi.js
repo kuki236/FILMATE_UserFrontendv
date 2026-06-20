@@ -225,6 +225,18 @@ export function normalizeCinema(cinema) {
   };
 }
 
+export function normalizeRoom(room) {
+  if (!room) return room;
+
+  return {
+    ...room,
+    id: room.id_sala || room.id,
+    nombre: room.nombre_sala || room.nombre || 'Sala',
+    tipoSala: room.tipo_sala || room.tipoSala || '',
+    tipoFormato: room.tipo_formato || room.tipoFormato || '',
+  };
+}
+
 export function normalizeShowtime(showtime) {
   const fechaHora = showtime.fecha_hora || showtime.fecha_hora_inicio || showtime.horario || '';
   const precioBase = Number(showtime.precio_base ?? showtime.precio ?? 0);
@@ -396,6 +408,12 @@ export async function getCinemas() {
 export async function getCinemaById(cinemaId) {
   const data = await request(`/client/cinemas/${cinemaId}`);
   return normalizeCinema(data);
+}
+
+export async function getRoomById(roomId) {
+  if (!roomId) return null;
+  const data = await request(`/admin/rooms/${roomId}`);
+  return normalizeRoom(data);
 }
 
 const extractShowtimeList = (data) => {

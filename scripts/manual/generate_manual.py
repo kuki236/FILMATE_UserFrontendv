@@ -38,6 +38,7 @@ CAPTURES = OUT / "capturas"
 DOC_CODE = "MU-FILMATE-USR-001"
 VERSION = "1.0"
 BASELINE_DATE = "20 de junio de 2026"
+TEACHER = "Reyes Huaman, Anita Marlene"
 
 
 @dataclass
@@ -53,6 +54,7 @@ class Manual:
         self.doc = Document()
         self.pdf_story: list = []
         self.figure_number = 0
+        self.first_level_one_heading = True
         self._configure_docx()
         self._configure_pdf()
 
@@ -230,8 +232,8 @@ class Manual:
             "| Curso | Gestión de la Configuración de Software |",
             "| Tipo de entregable | Manual de usuario con evidencia visual |",
             "| Estado | Versión para evaluación académica |",
-            "| Elaborado por | Equipo FILMATE (completar integrantes) |",
-            "| Docente / institución | Completar antes de la entrega |",
+            "| Elaborado por | Equipo del proyecto FILMATE |",
+            f"| Docente | {TEACHER} |",
             "",
             "> Este documento describe la versión observada del frontend de usuario FILMATE y sus flujos integrados.",
             "",
@@ -269,14 +271,11 @@ class Manual:
                 ["Línea base", BASELINE_DATE],
                 ["Curso", "Gestión de la Configuración de Software"],
                 ["Estado", "Versión para evaluación académica"],
-                ["Elaborado por", "Equipo FILMATE (completar integrantes)"],
-                ["Docente / institución", "Completar antes de la entrega"],
+                ["Elaborado por", "Equipo del proyecto FILMATE"],
+                ["Docente", TEACHER],
             ],
             header=True,
         )
-        note = self.doc.add_paragraph()
-        note.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        note.add_run("Documento editable: complete los campos institucionales antes de la entrega.").italic = True
         self.doc.add_page_break()
 
         self.pdf_story += [
@@ -307,24 +306,28 @@ class Manual:
                     ["Línea base", BASELINE_DATE],
                     ["Curso", "Gestión de la Configuración de Software"],
                     ["Estado", "Versión para evaluación académica"],
-                    ["Elaborado por", "Equipo FILMATE (completar integrantes)"],
-                    ["Docente / institución", "Completar antes de la entrega"],
+                    ["Elaborado por", "Equipo del proyecto FILMATE"],
+                    ["Docente", TEACHER],
                 ],
                 widths=[4.7 * cm, 10.3 * cm],
             )
         )
-        self.pdf_story += [
-            Spacer(1, 0.6 * cm),
-            Paragraph(
-                "Documento editable: complete los campos institucionales antes de la entrega.",
-                self.pdf_styles["caption"],
-            ),
-            PageBreak(),
-        ]
+        self.pdf_story.append(PageBreak())
 
     def heading(self, text: str, level: int = 1) -> None:
+        should_break_before = level == 1 and not self.first_level_one_heading
+
+        if level == 1:
+            if self.first_level_one_heading:
+                self.first_level_one_heading = False
+            else:
+                self.md += ["<div style=\"page-break-before: always;\"></div>", ""]
+                self.pdf_story.append(PageBreak())
+
         self.md += [f"{'#' * level} {text}", ""]
-        self.doc.add_heading(text, level=level)
+        heading = self.doc.add_heading(text, level=level)
+        if should_break_before:
+            heading.paragraph_format.page_break_before = True
         self.pdf_story.append(Paragraph(text, self.pdf_styles[f"h{level}"]))
 
     def paragraph(self, text: str, callout: bool = False) -> None:
@@ -1329,15 +1332,14 @@ def add_support_and_gcs(manual: Manual) -> None:
         "Aplicar selección → Guardar cambios.",
         callout=True,
     )
-    manual.heading("20. Lista de verificación antes de entregar", 1)
+    manual.heading("20. Verificación de integridad del entregable", 1)
     manual.bullets(
         [
-            "Completar universidad, docente e integrantes en la portada.",
-            "Revisar que el código, versión y fecha coincidan con la entrega.",
-            "Abrir el PDF y comprobar las 24 figuras.",
-            "Abrir el DOCX y actualizar campos de paginación si Word lo solicita.",
-            "Confirmar que no se incluyan contraseñas reales ni datos de pago.",
-            "Entregar junto con el repositorio o la línea base definida por el curso.",
+            "La portada identifica el curso, la docente, la versión y la línea base documental.",
+            "El PDF contiene las 24 figuras correspondientes a los flujos documentados.",
+            "El archivo DOCX conserva el contenido editable y la paginación.",
+            "El documento no incluye contraseñas reales ni datos financieros sensibles.",
+            "Los archivos fuente y las evidencias visuales permanecen versionados en el repositorio.",
         ]
     )
 

@@ -10,8 +10,8 @@
 | Curso | Gestión de la Configuración de Software |
 | Tipo de entregable | Manual de usuario con evidencia visual |
 | Estado | Versión para evaluación académica |
-| Elaborado por | Equipo FILMATE (completar integrantes) |
-| Docente / institución | Completar antes de la entrega |
+| Elaborado por | Equipo del proyecto FILMATE |
+| Docente | Reyes Huaman, Anita Marlene |
 
 > Este documento describe la versión observada del frontend de usuario FILMATE y sus flujos integrados.
 
@@ -24,6 +24,8 @@
 | 1.0 | 20/06/2026 | Emisión del manual académico en Markdown, Word y PDF. | Equipo FILMATE |
 
 > Criterio de configuración documental: este manual se identifica mediante el código MU-FILMATE-USR-001; la versión 1.0 queda asociada a la línea base visual del 20 de junio de 2026. Cualquier cambio en rutas, etiquetas, reglas de validación, pasos de compra o diseño de pantallas debe originar una nueva revisión del documento y la sustitución de las capturas afectadas.
+
+<div style="page-break-before: always;"></div>
 
 # Contenido
 
@@ -40,6 +42,8 @@
 - 11. Trazabilidad, criterios de aceptación y gestión del manual.
 - 12. Glosario y guía rápida.
 
+<div style="page-break-before: always;"></div>
+
 # 1. Introducción
 
 ## 1.1 Objetivo
@@ -55,6 +59,8 @@ No cubre la administración interna de películas, cines, salas, funciones, usua
 ## 1.3 Base de la evidencia
 
 Las capturas se obtuvieron el 20 de junio de 2026 sobre la aplicación React/Vite del repositorio FILMATE_UserFrontend. Debido a que la carga SQL de referencia programaba funciones únicamente del 6 al 16 de junio de 2026, se utilizó un entorno de demostración local controlado con la misma estructura de datos y contratos de API para habilitar fechas vigentes, asientos, dulcería, compra y módulos sociales. No se utilizaron datos financieros reales.
+
+<div style="page-break-before: always;"></div>
 
 # 2. Descripción general del sistema
 
@@ -88,6 +94,8 @@ FILMATE es una plataforma web orientada a clientes de cine. Integra consulta de 
 | Documento | Sí | Entre 8 y 15 caracteres alfanuméricos. |
 | Teléfono | No | Entre 7 y 15 dígitos, sin letras. |
 
+<div style="page-break-before: always;"></div>
+
 # 3. Convenciones y navegación
 
 ## 3.1 Convenciones visuales
@@ -108,6 +116,8 @@ FILMATE es una plataforma web orientada a clientes de cine. Integra consulta de 
 La cabecera permite desplazarse entre Cartelera, Cines, Dulcería y Social. El módulo Social aparece únicamente cuando la sesión corresponde a un usuario registrado. La ruta de compra sigue la secuencia:
 
 > Cartelera → Detalle de película → Función → Asientos → Dulcería → Verificación → Pago → Ticket.
+
+<div style="page-break-before: always;"></div>
 
 # 4. Acceso al sistema
 
@@ -152,6 +162,8 @@ Elementos y lectura de la pantalla:
 4. Para reservar o usar Social, cierre la sesión de invitado e ingrese con una cuenta registrada.
 
 > El modo invitado es útil para exploración rápida, pero no debe emplearse para operaciones que necesiten identificar al comprador o conservar preferencias sociales.
+
+<div style="page-break-before: always;"></div>
 
 # 5. Registro de usuario
 
@@ -198,6 +210,8 @@ Elementos y lectura de la pantalla:
 | Contraseña muy corta | Menos de 6 caracteres. | Definir una contraseña más larga. |
 | Documento inválido | Longitud o caracteres no admitidos. | Usar 8 a 15 caracteres alfanuméricos. |
 | No se pudo completar | API o red no disponible. | Esperar, comprobar conexión y reintentar. |
+
+<div style="page-break-before: always;"></div>
 
 # 6. Cartelera
 
@@ -263,6 +277,8 @@ Elementos y lectura de la pantalla:
 - Seleccione exactamente la función que desea reservar.
 - Si no aparecen horarios, pruebe otra película o fecha.
 
+<div style="page-break-before: always;"></div>
+
 # 7. Cines
 
 ## 7.1 Consultar sedes
@@ -289,6 +305,8 @@ Elementos y lectura de la pantalla:
 
 - Cierre la ventana para volver al listado.
 - Verifique la dirección textual si el mapa no carga.
+
+<div style="page-break-before: always;"></div>
 
 # 8. Reserva de entradas
 
@@ -343,6 +361,8 @@ Elementos y lectura de la pantalla:
 - El total se calcula como cantidad de asientos por precio base de la función.
 - Después de confirmar, conserve la misma sesión hasta obtener el ticket.
 
+<div style="page-break-before: always;"></div>
+
 # 9. Dulcería y carrito
 
 ## 9.1 Flujo asociado a una reserva
@@ -374,6 +394,8 @@ Elementos y lectura de la pantalla:
 
 - El total general combina entradas y productos.
 - Una cantidad reducida a cero elimina el producto.
+
+<div style="page-break-before: always;"></div>
 
 # 10. Verificación y pago
 
@@ -411,6 +433,8 @@ Elementos y lectura de la pantalla:
 
 La operación correcta genera un identificador de transacción, un número de pedido, el detalle del consumo, el total y un QR. Si aparece un error, no repita el pago inmediatamente: primero compruebe si ya existe una transacción.
 
+<div style="page-break-before: always;"></div>
+
 # 11. Ticket y comprobante QR
 
 1. Verifique película, sede, fecha, sala y asientos.
@@ -430,6 +454,8 @@ Elementos y lectura de la pantalla:
 - El botón de regreso finaliza el flujo y vuelve a la cartelera.
 
 > Recomendación de seguridad: trate el QR como un comprobante personal. Una captura compartida puede permitir que otra persona intente utilizar el pedido antes que el comprador.
+
+<div style="page-break-before: always;"></div>
 
 # 12. Módulo Social
 
@@ -515,6 +541,8 @@ Elementos y lectura de la pantalla:
 - Una marca azul identifica cada favorita.
 - Al alcanzar cinco, las películas restantes quedan deshabilitadas hasta retirar una.
 
+<div style="page-break-before: always;"></div>
+
 # 13. Cerrar sesión
 
 1. Seleccione «Cerrar Sesión» en la cabecera.
@@ -530,6 +558,8 @@ Elementos y lectura de la pantalla:
 
 - El cierre elimina la sesión almacenada en el navegador.
 - En equipos compartidos, cierre siempre la sesión al terminar.
+
+<div style="page-break-before: always;"></div>
 
 # 14. Solución de problemas
 
@@ -553,6 +583,8 @@ Elementos y lectura de la pantalla:
 4. Consulte el historial disponible o contacte soporte antes de intentar de nuevo.
 5. No comparta datos completos de tarjeta ni el QR con soporte informal.
 
+<div style="page-break-before: always;"></div>
+
 # 15. Seguridad, privacidad y buenas prácticas
 
 - Use una contraseña exclusiva y no la comparta.
@@ -563,6 +595,8 @@ Elementos y lectura de la pantalla:
 - Evite actualizar o retroceder mientras se procesa una transacción.
 - Mantenga el navegador actualizado.
 - Reporte mensajes inesperados, cobros duplicados o cambios de perfil no autorizados.
+
+<div style="page-break-before: always;"></div>
 
 # 16. Criterios de aceptación del usuario
 
@@ -580,6 +614,8 @@ Elementos y lectura de la pantalla:
 | CA-10 | El usuario busca y sigue otros perfiles. | Figuras 20 y 21 |
 | CA-11 | El usuario edita su perfil y favoritas. | Figuras 22 y 23 |
 | CA-12 | El usuario puede cerrar su sesión de forma confirmada. | Figura 24 |
+
+<div style="page-break-before: always;"></div>
 
 # 17. Gestión de configuración del manual
 
@@ -611,6 +647,8 @@ Para el curso de Gestión de la Configuración de Software, este manual se consi
 
 Se recomienda usar versión mayor cuando cambia el flujo o alcance del manual; versión menor cuando se agregan funciones compatibles; y revisión de parche cuando solo se corrigen redacción, formato o capturas sin cambiar el procedimiento.
 
+<div style="page-break-before: always;"></div>
+
 # 18. Glosario
 
 | Término | Definición |
@@ -626,17 +664,20 @@ Se recomienda usar versión mayor cuando cambia el flujo o alcance del manual; v
 | Línea base | Versión aprobada y controlada de software, datos o documentación. |
 | Elemento de configuración | Activo sujeto a identificación, versión, cambio y auditoría. |
 
+<div style="page-break-before: always;"></div>
+
 # 19. Guía rápida
 
 > Comprar entradas: Iniciar sesión → Cartelera → Película → Horario → Asientos → Confirmar → Agregar u omitir snacks → Verificar → Elegir pago → Pagar → Descargar ticket.
 
 > Actualizar perfil: Social → Editar Perfil → Modificar → Cambiar datos/avatar → Editar favoritas → Aplicar selección → Guardar cambios.
 
-# 20. Lista de verificación antes de entregar
+<div style="page-break-before: always;"></div>
 
-- Completar universidad, docente e integrantes en la portada.
-- Revisar que el código, versión y fecha coincidan con la entrega.
-- Abrir el PDF y comprobar las 24 figuras.
-- Abrir el DOCX y actualizar campos de paginación si Word lo solicita.
-- Confirmar que no se incluyan contraseñas reales ni datos de pago.
-- Entregar junto con el repositorio o la línea base definida por el curso.
+# 20. Verificación de integridad del entregable
+
+- La portada identifica el curso, la docente, la versión y la línea base documental.
+- El PDF contiene las 24 figuras correspondientes a los flujos documentados.
+- El archivo DOCX conserva el contenido editable y la paginación.
+- El documento no incluye contraseñas reales ni datos financieros sensibles.
+- Los archivos fuente y las evidencias visuales permanecen versionados en el repositorio.

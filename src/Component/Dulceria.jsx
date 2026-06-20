@@ -89,11 +89,11 @@ function TicketContent({ carrito, total, pedidoNumber, fechaCompra, bookingConte
         <div className="rounded-2xl border border-slate-800 bg-slate-900 p-4">
           <div className="flex items-center justify-between gap-4">
             <div>
-              <p className="text-sm text-slate-400">Numero de pedido</p>
+              <p className="text-sm text-slate-400">Número de pedido</p>
               <p className="text-2xl font-bold text-white">{pedidoNumber}</p>
               {transactionId && (
                 <p className="mt-1 text-xs uppercase tracking-[0.2em] text-blue-300">
-                  Transaccion #{transactionId}
+                  Transacción #{transactionId}
                 </p>
               )}
             </div>
@@ -186,7 +186,7 @@ function VerificationModal({
 
         <div className="max-h-[85vh] overflow-y-auto px-4 py-5 sm:px-6">
           <p className="mb-4 text-sm text-slate-300">
-            Tu pedido de confiteria sera preparado con estos productos.
+            Tu pedido de confitería será preparado con estos productos.
           </p>
 
           <div className="mb-6 space-y-3 border-y border-slate-700 py-4">
@@ -272,7 +272,7 @@ function PaymentModal({
 }) {
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/70 p-3 sm:items-center sm:p-4">
-      <div className="flex max-h-[92vh] w-full max-w-[95vw] flex-col overflow-y-auto rounded-2xl border border-slate-700 bg-slate-900 shadow-2xl sm:max-w-md">
+      <div className="flex max-h-[92vh] w-full max-w-[95vw] flex-col overflow-y-auto rounded-2xl border border-slate-700 bg-slate-900 font-sans shadow-2xl sm:max-w-lg">
         <div className="shrink-0 flex items-center justify-between border-b border-slate-700 px-4 py-4 sm:px-6">
           <h2 className="text-lg font-bold text-white sm:text-xl">Pago</h2>
           <button
@@ -285,16 +285,16 @@ function PaymentModal({
 
         <div className="px-4 py-5 sm:px-6">
           <div className="mb-4 rounded-xl border border-blue-500/30 bg-blue-500/10 p-4">
-            <p className="text-sm text-slate-300">Total a cobrar</p>
-            <p className="text-3xl font-bold text-white">S/. {paymentTotal.toFixed(2)}</p>
+            <p className="text-sm font-medium text-slate-300">Total a cobrar</p>
+            <p className="mt-1 text-3xl font-extrabold tracking-tight text-white">S/. {paymentTotal.toFixed(2)}</p>
             {isSeatFlow && (
-              <p className="mt-2 text-sm text-slate-200">
-                Asientos: {seatsCount} Â· Subtotal asientos: S/. {reservationTotal.toFixed(2)}
+              <p className="mt-2 text-sm leading-relaxed text-slate-200">
+                Asientos: {seatsCount} · Subtotal asientos: S/. {reservationTotal.toFixed(2)}
               </p>
             )}
             {isSeatFlow && skipSnacksForReservation && (
-              <p className="mt-2 text-sm font-semibold text-emerald-300">
-                Snacks omitidos: no se cobrarÃ¡n en esta compra.
+              <p className="mt-2 text-sm font-semibold leading-relaxed text-emerald-300">
+                Snacks omitidos: no se cobrarán en esta compra.
               </p>
             )}
           </div>
@@ -307,10 +307,10 @@ function PaymentModal({
 
           {bookingContext && (
             <div className="mb-4 rounded-xl border border-slate-700 bg-slate-800 p-4">
-              <p className="text-xs uppercase tracking-[0.25em] text-slate-400">PelÃ­cula y asientos</p>
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Película y asientos</p>
               <p className="mt-2 text-lg font-bold text-white">{bookingContext.pelicula}</p>
-              <p className="mt-1 text-sm text-slate-300">
-                {bookingContext.sede} Â· {bookingContext.horario} Â· {bookingContext.sala}
+              <p className="mt-1 text-sm leading-relaxed text-slate-300">
+                {bookingContext.sede} · {bookingContext.horario} · {bookingContext.sala}
               </p>
               <p className="mt-2 text-sm text-slate-300">
                 {bookingContext.asientos?.length ? bookingContext.asientos.join(', ') : 'Sin asientos'}
@@ -341,9 +341,9 @@ function PaymentModal({
                     >
                       <Icon className="h-5 w-5" />
                     </div>
-                    <div>
-                      <p className="font-semibold text-white">{option.label}</p>
-                      <p className="text-xs text-slate-400">{option.description}</p>
+                    <div className="min-w-0">
+                      <p className="font-semibold leading-tight text-white">{option.label}</p>
+                      <p className="mt-1 text-xs leading-snug text-slate-400">{option.description}</p>
                     </div>
                   </div>
                 </button>
@@ -353,7 +353,7 @@ function PaymentModal({
 
           <div className="mb-6 rounded-xl bg-slate-800 p-4">
             <div className="mb-3 flex items-center justify-between text-sm text-slate-300">
-              <span>MÃ©todo seleccionado</span>
+              <span>Método seleccionado</span>
               <span className="text-blue-300">{selectedPayment?.label}</span>
             </div>
             <div className="mb-3 flex items-center justify-between text-sm text-slate-300">
@@ -383,7 +383,7 @@ function PaymentModal({
               disabled={isProcessingPayment}
               className="flex-1 rounded-lg bg-emerald-600 py-2 font-semibold text-white transition-colors hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-emerald-800"
             >
-              {isProcessingPayment ? 'Pagando...' : `Pagar con ${selectedPayment?.label || 'mÃ©todo'}`}
+              {isProcessingPayment ? 'Pagando...' : `Pagar con ${selectedPayment?.label || 'método'}`}
             </button>
           </div>
         </div>
@@ -404,12 +404,12 @@ function ExitConfirmDialog({ pendingExitAction, onClose, onConfirm }) {
           </div>
           <div>
             <h2 className="text-lg font-bold text-white sm:text-xl">
-              {isPaymentExit ? 'Â¿Cancelar el pago?' : 'Â¿Seguro que quieres salir?'}
+              {isPaymentExit ? '¿Cancelar el pago?' : '¿Seguro que quieres salir?'}
             </h2>
             <p className="text-sm text-slate-400">
               {isPaymentExit
-                ? 'VolverÃ¡s a la verificaciÃ³n del pedido.'
-                : 'Tu pedido se mantendrÃ¡ guardado mientras sigas en esta sesiÃ³n.'}
+                ? 'Volverás a la verificación del pedido.'
+                : 'Tu pedido se mantendrá guardado mientras sigas en esta sesión.'}
             </p>
           </div>
         </div>
@@ -417,8 +417,8 @@ function ExitConfirmDialog({ pendingExitAction, onClose, onConfirm }) {
         <div className="px-4 py-5 sm:px-6">
           <p className="mb-6 text-sm leading-relaxed text-slate-300">
             {isPaymentExit
-              ? 'Si cancelas, regresarÃ¡s al resumen de tu compra para revisar o cambiar tus productos.'
-              : 'Si sales ahora, volverÃ¡s a la dulcerÃ­a y no perderÃ¡s lo que ya llevas en el carrito.'}
+              ? 'Si cancelas, regresarás al resumen de tu compra para revisar o cambiar tus productos.'
+              : 'Si sales ahora, volverás a la dulcería y no perderás lo que ya llevas en el carrito.'}
           </p>
 
           <div className="flex gap-3">
@@ -432,7 +432,7 @@ function ExitConfirmDialog({ pendingExitAction, onClose, onConfirm }) {
               onClick={onConfirm}
               className="flex-1 rounded-lg bg-yellow-500 py-2 font-semibold text-slate-950 transition-colors hover:bg-yellow-400"
             >
-              {isPaymentExit ? 'SÃ­, volver' : 'SÃ­, salir'}
+              {isPaymentExit ? 'Sí, volver' : 'Sí, salir'}
             </button>
           </div>
         </div>
@@ -511,7 +511,7 @@ function SuccessModal({
               onClick={onClose}
               className="rounded-lg bg-slate-700 py-2 font-semibold text-white transition-colors hover:bg-slate-600"
             >
-              {isSeatFlow ? 'Volver a cartelera' : 'Volver a dulcerÃ­a'}
+              {isSeatFlow ? 'Volver a cartelera' : 'Volver a dulcería'}
             </button>
             <button
               onClick={onDownload}

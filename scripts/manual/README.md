@@ -39,4 +39,4 @@ Los entregables se crean en `docs/manual-usuario/`:
 - `Manual_de_Usuario_FILMATE.pdf`
 - `capturas/*.png`
 
-Antes de entregar, complete universidad, docente e integrantes en la portada editable.
+Los documentos generados conservan la información académica definida en `generate_manual.py`.
