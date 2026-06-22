@@ -379,6 +379,40 @@ export function normalizeRatedMovie(item) {
   };
 }
 
+export function normalizeMovieReview(review, user = null) {
+  const profile = normalizeUser(review?.usuario || review?.user || user);
+  const username =
+    profile?.username ||
+    review?.username ||
+    review?.nombre_usuario ||
+    review?.nombreUsuario ||
+    '';
+  const normalizedUsername = username
+    ? `@${String(username).replace(/^@/, '')}`
+    : profile?.nombre || review?.nombre || 'Usuario';
+
+  return {
+    id: review?.id_resena || review?.id,
+    userId: review?.id_usuario || profile?.id_usuario || profile?.id || null,
+    usuario: normalizedUsername,
+    avatar: profile?.url_perfil || review?.url_perfil || review?.avatar || '',
+    rating: Number(
+      review?.puntuacion_estrellas ??
+        review?.calificacion ??
+        review?.rating ??
+        review?.estrellas ??
+        0
+    ),
+    texto: review?.comentario || review?.texto || '',
+    fechaPublicacion:
+      review?.fecha_publicacion ||
+      review?.fechaPublicacion ||
+      review?.created_at ||
+      review?.fecha_creacion ||
+      null,
+  };
+}
+
 export async function getMovies({ skip = 0, limit = 50, generoId } = {}) {
   const query = new URLSearchParams();
   query.set('skip', String(skip));
@@ -416,6 +450,47 @@ export async function createMovieReview(payload) {
       comentario: payload.comentario,
     }),
   });
+}
+
+export async function getMovieReviews(movieId) {
+  if (!movieId) return [];
+
+  const data = await request(`/client/reviews/movie/${movieId}`);
+  const reviews = asPayloadArray(data, ['results', 'reviews', 'resenas', 'items']);
+  const userIds = [
+    ...new Set(
+      reviews
+        .map((review) => review?.id_usuario || review?.usuario?.id_usuario || review?.user?.id_usuario)
+        .filter(Boolean)
+        .map(String)
+    ),
+  ];
+  const profiles = await Promise.all(
+    userIds.map(async (userId) => {
+      try {
+        return [userId, await getUserProfile(userId)];
+      } catch {
+        return [userId, null];
+      }
+    })
+  );
+  const profilesById = Object.fromEntries(profiles);
+
+  return reviews
+    .map((review) => {
+      const userId = String(
+        review?.id_usuario ||
+          review?.usuario?.id_usuario ||
+          review?.user?.id_usuario ||
+          ''
+      );
+      return normalizeMovieReview(review, profilesById[userId]);
+    })
+    .sort((firstReview, secondReview) => {
+      const firstDate = Date.parse(firstReview.fechaPublicacion || '') || 0;
+      const secondDate = Date.parse(secondReview.fechaPublicacion || '') || 0;
+      return secondDate - firstDate;
+    });
 }
 
 export async function getCinemas() {

@@ -4,7 +4,7 @@ import Header from './Header.jsx';
 import Footer from './Footer.jsx';
 import StarRatingDisplay from './StarRatingDisplay.jsx';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
-import { createSeatWebSocket, getMovieById, getRoomById, getSeatMap, getShowtimesByDate, normalizeSeat } from './filmateApi';
+import { createSeatWebSocket, getMovieById, getMovieReviews, getRoomById, getSeatMap, getShowtimesByDate, normalizeSeat } from './filmateApi';
 
 const FALLBACK_MEDIA_IMAGE =
     "data:image/svg+xml;charset=UTF-8," +
@@ -121,6 +121,84 @@ const keepAvailableSelectedSeats = (selectedSeats, nextSeats) =>
         )
     );
 
+const reviewRelativeTimeFormatter = new Intl.RelativeTimeFormat('es', {
+    numeric: 'always',
+});
+
+const formatReviewAge = (dateValue) => {
+    if (!dateValue) return 'Fecha no disponible';
+
+    const reviewDate = new Date(dateValue);
+    if (Number.isNaN(reviewDate.getTime())) return 'Fecha no disponible';
+
+    const differenceMs = reviewDate.getTime() - Date.now();
+    const absoluteDifference = Math.abs(differenceMs);
+
+    if (absoluteDifference < 10 * 1000) return 'hace unos segundos';
+
+    const units = [
+        ['year', 365 * 24 * 60 * 60 * 1000],
+        ['month', 30 * 24 * 60 * 60 * 1000],
+        ['week', 7 * 24 * 60 * 60 * 1000],
+        ['day', 24 * 60 * 60 * 1000],
+        ['hour', 60 * 60 * 1000],
+        ['minute', 60 * 1000],
+        ['second', 1000],
+    ];
+    const [unit, unitMs] = units.find(([, milliseconds]) => absoluteDifference >= milliseconds) || units.at(-1);
+
+    return reviewRelativeTimeFormatter.format(Math.round(differenceMs / unitMs), unit);
+};
+
+const ReviewCard = ({ review, modal = false }) => {
+    const avatarSizeClass = modal ? 'h-14 w-14' : 'h-12 w-12';
+    const usernameSizeClass = modal ? 'text-lg' : 'text-sm';
+    const cardClass = modal
+        ? 'rounded-2xl border border-slate-600/50 bg-slate-700/30 p-6 backdrop-blur-sm'
+        : 'rounded-3xl border border-slate-700/50 bg-slate-800/30 p-5 backdrop-blur-sm';
+    const initial = String(review.usuario || 'U').replace(/^@/, '').charAt(0).toUpperCase();
+
+    return (
+        <article className={cardClass}>
+            <div className="mb-3 flex items-start gap-3">
+                <div className={`relative flex ${avatarSizeClass} flex-shrink-0 items-center justify-center overflow-hidden rounded-full border-2 border-slate-600 bg-slate-700 font-bold text-slate-200`}>
+                    <span aria-hidden="true">{initial}</span>
+                    {review.avatar && (
+                        <img
+                            src={review.avatar}
+                            alt=""
+                            className="absolute inset-0 h-full w-full object-cover"
+                            onError={(event) => {
+                                event.currentTarget.style.display = 'none';
+                            }}
+                        />
+                    )}
+                </div>
+                <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+                        <p className={`${usernameSizeClass} truncate font-bold text-white`}>{review.usuario}</p>
+                        <time
+                            dateTime={review.fechaPublicacion || undefined}
+                            className="text-xs font-medium text-slate-400"
+                        >
+                            {formatReviewAge(review.fechaPublicacion)}
+                        </time>
+                    </div>
+                    <StarRatingDisplay
+                        rating={review.rating}
+                        sizeClass="h-4 w-4"
+                        justifyClass="justify-start"
+                        emptyClass="text-gray-400"
+                    />
+                </div>
+            </div>
+            <p className={`${modal ? '' : 'text-sm'} whitespace-pre-wrap text-gray-300`}>
+                {review.texto || 'Sin comentario.'}
+            </p>
+        </article>
+    );
+};
+
 const getCinemaByRoomId = (roomId) => {
     const id = Number(roomId);
     if (id >= 1 && id <= 5) return { id: 1, nombre: 'Filmate La Molina' };
@@ -221,6 +299,9 @@ export const DetallePelicula = () => {
     const [movieDetails, setMovieDetails] = useState(null);
     const [movieLoading, setMovieLoading] = useState(Boolean(movieId));
     const [movieError, setMovieError] = useState('');
+    const [reviews, setReviews] = useState([]);
+    const [reviewsLoading, setReviewsLoading] = useState(Boolean(movieId));
+    const [reviewsError, setReviewsError] = useState('');
     const location = useLocation();
     const navigate = useNavigate();
     const seatGridRef = useRef(null);
@@ -280,6 +361,43 @@ export const DetallePelicula = () => {
             isMounted = false;
         };
     }, [movieId]);
+
+    useEffect(() => {
+        const reviewMovieId = pelicula?.id || movieId;
+        let isMounted = true;
+
+        const loadReviews = async () => {
+            if (!reviewMovieId) {
+                setReviews([]);
+                setReviewsLoading(false);
+                return;
+            }
+
+            try {
+                setReviewsLoading(true);
+                setReviewsError('');
+                const movieReviews = await getMovieReviews(reviewMovieId);
+
+                if (!isMounted) return;
+                setReviews(movieReviews);
+            } catch (err) {
+                if (!isMounted) return;
+                console.error('Error cargando reseñas de la película:', err);
+                setReviews([]);
+                setReviewsError('No se pudieron cargar las reseñas de la comunidad.');
+            } finally {
+                if (isMounted) {
+                    setReviewsLoading(false);
+                }
+            }
+        };
+
+        loadReviews();
+
+        return () => {
+            isMounted = false;
+        };
+    }, [movieId, pelicula?.id]);
 
     useEffect(() => {
         let isMounted = true;
@@ -483,58 +601,6 @@ export const DetallePelicula = () => {
             </div>
         );
     }
-
-    const resenas = [
-        {
-            id: 1,
-            usuario: "Carlos Mendoza",
-            rating: 5,
-            avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed=1",
-            texto: "Nunca pensé que saldría del cine con el corazón latiendo a mil por hora..."
-        },
-        {
-            id: 2,
-            usuario: "María García",
-            rating: 4,
-            avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed=2",
-            texto: "Una versión diferente a lo que esperaba, pero con mucho corazón..."
-        },
-        {
-            id: 3,
-            usuario: "Roberto Silva",
-            rating: 5,
-            avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed=3",
-            texto: "El desarrollo de los personajes y el ritmo están muy bien logrados..."
-        },
-        {
-            id: 4,
-            usuario: "Ana Torres",
-            rating: 5,
-            avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed=4",
-            texto: "Captura la esencia del género de forma fresca y emocionante."
-        },
-        {
-            id: 5,
-            usuario: "Luis Ramírez",
-            rating: 4,
-            avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed=5",
-            texto: "Entretenida, atractiva y con momentos emotivos."
-        },
-        {
-            id: 6,
-            usuario: "Patricia Flores",
-            rating: 5,
-            avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed=6",
-            texto: "Escenas memorables que se quedan contigo."
-        },
-        {
-            id: 7,
-            usuario: "Diego Castro",
-            rating: 3,
-            avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed=7",
-            texto: "Buena, aunque algo apresurada en partes."
-        }
-    ];
 
     const renderStars = (rating, centered = false) => (
         <StarRatingDisplay
@@ -1106,28 +1172,34 @@ export const DetallePelicula = () => {
 
                         {/* Reseñas desktop */}
                         <div className="space-y-4 hidden lg:block">
-                            {resenas.slice(0, 3).map((resena) => (
-                                <div key={resena.id} className="bg-slate-800/30 backdrop-blur-sm rounded-3xl p-5 border border-slate-700/50">
-                                    <div className="flex items-start gap-3 mb-3">
-                                        <div className="w-12 h-12 rounded-full overflow-hidden border-2 border-slate-600 flex-shrink-0">
-                                            <img src={resena.avatar} alt={resena.usuario} className="w-full h-full object-cover" />
-                                        </div>
-                                        <div className="flex-1">
-                                            <p className="text-white font-bold text-sm mb-1">{resena.usuario}</p>
-                                            {renderStars(resena.rating)}
-                                        </div>
-                                    </div>
-                                    <p className="text-gray-300 text-sm">{resena.texto}</p>
+                            <h3 className="text-xl font-bold text-white">Reseñas de la comunidad</h3>
+                            {reviewsLoading ? (
+                                Array.from({ length: 2 }).map((_, index) => (
+                                    <div key={index} className="h-36 animate-pulse rounded-3xl border border-slate-700/50 bg-slate-800/30" />
+                                ))
+                            ) : reviewsError ? (
+                                <div className="rounded-3xl border border-amber-500/40 bg-amber-500/10 p-5 text-sm text-amber-100">
+                                    {reviewsError}
                                 </div>
-                            ))}
+                            ) : reviews.length > 0 ? (
+                                reviews.slice(0, 3).map((review) => (
+                                    <ReviewCard key={review.id} review={review} />
+                                ))
+                            ) : (
+                                <div className="rounded-3xl border border-slate-700/50 bg-slate-800/30 p-5 text-sm text-slate-300">
+                                    Todavía no hay reseñas para esta película.
+                                </div>
+                            )}
                         </div>
 
-                        <button
-                            onClick={() => setShowAllReviews(true)}
-                            className="w-full bg-red-500 hover:bg-red-600 text-white font-bold py-4 rounded-full transition-all duration-300 shadow-lg hover:scale-105 text-xl hidden lg:block"
-                        >
-                            Leer más reseñas
-                        </button>
+                        {reviews.length > 3 && (
+                            <button
+                                onClick={() => setShowAllReviews(true)}
+                                className="w-full bg-red-500 hover:bg-red-600 text-white font-bold py-4 rounded-full transition-all duration-300 shadow-lg hover:scale-105 text-xl hidden lg:block"
+                            >
+                                Leer más reseñas
+                            </button>
+                        )}
                     </div>
 
                     {/* Columna Derecha */}
@@ -1234,28 +1306,34 @@ export const DetallePelicula = () => {
 
                         {/* Reseñas móvil */}
                         <div className="order-3 space-y-4 lg:hidden">
-                            {resenas.slice(0, 3).map((resena) => (
-                                <div key={resena.id} className="bg-slate-800/30 backdrop-blur-sm rounded-3xl p-5 border border-slate-700/50">
-                                    <div className="flex items-start gap-3 mb-3">
-                                        <div className="w-12 h-12 rounded-full overflow-hidden border-2 border-slate-600 flex-shrink-0">
-                                            <img src={resena.avatar} alt={resena.usuario} className="w-full h-full object-cover" />
-                                        </div>
-                                        <div className="flex-1">
-                                            <p className="text-white font-bold text-sm mb-1">{resena.usuario}</p>
-                                            {renderStars(resena.rating)}
-                                        </div>
-                                    </div>
-                                    <p className="text-gray-300 text-sm">{resena.texto}</p>
+                            <h3 className="text-xl font-bold text-white">Reseñas de la comunidad</h3>
+                            {reviewsLoading ? (
+                                Array.from({ length: 2 }).map((_, index) => (
+                                    <div key={index} className="h-36 animate-pulse rounded-3xl border border-slate-700/50 bg-slate-800/30" />
+                                ))
+                            ) : reviewsError ? (
+                                <div className="rounded-3xl border border-amber-500/40 bg-amber-500/10 p-5 text-sm text-amber-100">
+                                    {reviewsError}
                                 </div>
-                            ))}
+                            ) : reviews.length > 0 ? (
+                                reviews.slice(0, 3).map((review) => (
+                                    <ReviewCard key={review.id} review={review} />
+                                ))
+                            ) : (
+                                <div className="rounded-3xl border border-slate-700/50 bg-slate-800/30 p-5 text-sm text-slate-300">
+                                    Todavía no hay reseñas para esta película.
+                                </div>
+                            )}
                         </div>
 
-                        <button
-                            onClick={() => setShowAllReviews(true)}
-                            className="order-3 w-full bg-red-500 hover:bg-red-600 text-white font-bold py-4 rounded-full transition-all duration-300 shadow-lg hover:scale-105 text-xl lg:hidden"
-                        >
-                            Leer más reseñas
-                        </button>
+                        {reviews.length > 3 && (
+                            <button
+                                onClick={() => setShowAllReviews(true)}
+                                className="order-3 w-full bg-red-500 hover:bg-red-600 text-white font-bold py-4 rounded-full transition-all duration-300 shadow-lg hover:scale-105 text-xl lg:hidden"
+                            >
+                                Leer más reseñas
+                            </button>
+                        )}
                     </div>
                 </div>
 
@@ -1345,19 +1423,8 @@ export const DetallePelicula = () => {
                             </div>
 
                             <div className="overflow-y-auto p-6 space-y-4 flex-1">
-                                {resenas.map((resena) => (
-                                    <div key={resena.id} className="bg-slate-700/30 backdrop-blur-sm rounded-2xl p-6 border border-slate-600/50">
-                                        <div className="flex items-start gap-4 mb-3">
-                                            <div className="w-14 h-14 rounded-full overflow-hidden border-2 border-slate-500">
-                                                <img src={resena.avatar} alt={resena.usuario} className="w-full h-full object-cover" />
-                                            </div>
-                                            <div className="flex-1">
-                                                <p className="text-white font-bold text-lg mb-1">{resena.usuario}</p>
-                                {renderStars(resena.rating)}
-                                            </div>
-                                        </div>
-                                        <p className="text-gray-300">{resena.texto}</p>
-                                    </div>
+                                {reviews.map((review) => (
+                                    <ReviewCard key={review.id} review={review} modal />
                                 ))}
                             </div>
                         </div>

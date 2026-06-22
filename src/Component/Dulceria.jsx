@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import Header from './Header.jsx';
 import Footer from './Footer.jsx';
-import { AlertTriangle, ArrowLeft, Banknote, CheckCircle2, CreditCard, Minus, Plus, ShoppingCart, Smartphone, X } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, CheckCircle2, CreditCard, Minus, Plus, ShoppingCart, Smartphone, X } from 'lucide-react';
 import { QRCodeCanvas } from 'qrcode.react';
 import jsPDF from 'jspdf';
 import { checkoutOrder, getSnackProducts } from './filmateApi';
@@ -40,12 +40,6 @@ const paymentOptions = [
     label: 'Plin',
     description: 'Transferencia instantánea.',
     icon: Smartphone,
-  },
-  {
-    id: 'efectivo',
-    label: 'Efectivo',
-    description: 'Paga en caja al recoger.',
-    icon: Banknote,
   },
 ];
 
