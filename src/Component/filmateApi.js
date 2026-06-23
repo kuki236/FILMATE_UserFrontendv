@@ -790,23 +790,13 @@ export async function getFollowing(userId) {
 export async function followUser(followerId, followedId) {
   if (!followerId || !followedId) return null;
 
-  return requestFirstAvailable(
-    [
-      '/client/seguidores/',
-      '/client/seguidores/seguir',
-    ],
-    {
-      method: 'POST',
-      body: JSON.stringify({
-        id_usuario: followerId,
-        id_seguidor: followerId,
-        id_usuario_seguidor: followerId,
-        id_usuario_seguido: followedId,
-        id_seguido: followedId,
-        seguido_id: followedId,
-      }),
-    }
-  );
+  return request('/client/seguidores/seguir', {
+    method: 'POST',
+    body: JSON.stringify({
+      id_usuario: followerId,
+      id_seguir: followedId,
+    }),
+  });
 }
 
 export async function getSnackCategories() {
