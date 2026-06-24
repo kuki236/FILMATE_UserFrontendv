@@ -122,9 +122,12 @@ const parseTextList = (value) => {
   if (typeof value === 'object') {
     return [
       value.nombre,
+      value.genero?.nombre,
       value.nombre_genero,
       value.genero_nombre,
+      value.actor?.nombre,
       value.actor_nombre,
+      value.director?.nombre,
       value.director_nombre,
     ]
       .filter(Boolean)

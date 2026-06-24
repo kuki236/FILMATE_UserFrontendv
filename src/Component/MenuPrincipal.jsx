@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useMemo, useState } from 'react';
+﻿import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Filter, X } from 'lucide-react';
 import Header from './Header.jsx';
 import Footer from './Footer.jsx';
@@ -66,14 +66,14 @@ export const MenuPrincipal = () => {
         []
     );
 
-    const normalizeText = (value) =>
+    const normalizeText = useCallback((value) =>
         String(value || '')
             .toLowerCase()
             .normalize('NFD')
             .replace(/[\u0300-\u036f]/g, '')
-            .trim();
+            .trim(), []);
 
-    const getMovieGenres = (pelicula) => {
+    const getMovieGenres = useCallback((pelicula) => {
         if (Array.isArray(pelicula.generos) && pelicula.generos.length > 0) {
             return pelicula.generos.map((genre) => normalizeText(genre)).filter(Boolean);
         }
@@ -86,18 +86,18 @@ export const MenuPrincipal = () => {
         }
 
         return [];
-    };
+    }, [normalizeText]);
 
-    const formatDateKey = (date) => {
+    const formatDateKey = useCallback((date) => {
         const parts = dateKeyFormatter.formatToParts(date);
         const year = parts.find((part) => part.type === 'year')?.value || '';
         const month = parts.find((part) => part.type === 'month')?.value || '';
         const day = parts.find((part) => part.type === 'day')?.value || '';
 
         return year && month && day ? `${year}-${month}-${day}` : '';
-    };
+    }, [dateKeyFormatter]);
 
-    const getOffsetDateKey = (offsetDays) => {
+    const getOffsetDateKey = useCallback((offsetDays) => {
         const todayParts = dateKeyFormatter.formatToParts(new Date());
         const year = Number(todayParts.find((part) => part.type === 'year')?.value || 0);
         const month = Number(todayParts.find((part) => part.type === 'month')?.value || 0);
@@ -108,9 +108,9 @@ export const MenuPrincipal = () => {
         const utcNoon = Date.UTC(year, month - 1, day, 12);
         const targetDate = new Date(utcNoon + offsetDays * 24 * 60 * 60 * 1000);
         return formatDateKey(targetDate);
-    };
+    }, [dateKeyFormatter, formatDateKey]);
 
-    const formatDayLabel = (dateKey) => {
+    const formatDayLabel = useCallback((dateKey) => {
         const relativeLabels = {
             [getOffsetDateKey(0)]: 'Hoy',
             [getOffsetDateKey(1)]: 'Mañana',
@@ -130,7 +130,7 @@ export const MenuPrincipal = () => {
         }).format(parsedDate);
 
         return label.charAt(0).toUpperCase() + label.slice(1);
-    };
+    }, [getOffsetDateKey]);
 
     useEffect(() => {
         let isMounted = true;
@@ -204,6 +204,14 @@ export const MenuPrincipal = () => {
 
                 if (!isMounted) return;
                 setAvailableDays(daysWithShowtimes);
+                setSelectedDay((currentDay) => {
+                    if (currentDay && daysWithShowtimes.includes(currentDay)) {
+                        return currentDay;
+                    }
+
+                    const todayKey = getOffsetDateKey(0);
+                    return daysWithShowtimes.includes(todayKey) ? todayKey : daysWithShowtimes[0] || '';
+                });
             } catch (err) {
                 if (!isMounted) return;
                 console.error('Error cargando filtros:', err);
@@ -221,7 +229,7 @@ export const MenuPrincipal = () => {
         return () => {
             isMounted = false;
         };
-    }, []);
+    }, [getOffsetDateKey]);
 
     useEffect(() => {
         let isMounted = true;
@@ -272,19 +280,7 @@ export const MenuPrincipal = () => {
                 value: dateKey,
                 label: formatDayLabel(dateKey),
             }));
-    }, [availableDays]);
-
-    useEffect(() => {
-        if (filtersLoading || days.length === 0) return;
-
-        const todayKey = getOffsetDateKey(0);
-        const hasSelectedDay = days.some((day) => day.value === selectedDay);
-
-        if (hasSelectedDay) return;
-
-        const todayOption = days.find((day) => day.value === todayKey);
-        setSelectedDay(todayOption?.value || days[0].value);
-    }, [days, filtersLoading, selectedDay]);
+    }, [availableDays, formatDayLabel]);
 
     const renderStars = (rating) => {
         return (
@@ -316,13 +312,7 @@ export const MenuPrincipal = () => {
         });
 
         return Array.from(genres).sort((a, b) => a.localeCompare(b, 'es'));
-    }, [peliculasData]);
-
-    const allPeliculasSorted = useMemo(() => {
-        return peliculasData
-            .slice()
-            .sort((a, b) => (b.estreno ? 1 : 0) - (a.estreno ? 1 : 0));
-    }, [peliculasData]);
+    }, [getMovieGenres, peliculasData]);
 
     const filteredPeliculas = useMemo(() => {
         const matchingMovieIds = new Set(
@@ -345,7 +335,7 @@ export const MenuPrincipal = () => {
         });
 
         return result;
-    }, [filteredShowtimes, filtersLoading, peliculasData, selectedDay, selectedGenre]);
+    }, [filteredShowtimes, filtersLoading, getMovieGenres, peliculasData, selectedDay, selectedGenre]);
 
     const displayPeliculas = useMemo(
         () =>

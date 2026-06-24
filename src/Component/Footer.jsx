@@ -1,4 +1,3 @@
-import React from 'react';
 import { Facebook, Instagram, Music2, Youtube, X, BookOpen, ChevronRight } from 'lucide-react';
 
 const footerGroups = [

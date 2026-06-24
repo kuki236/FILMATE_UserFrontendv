@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import Header from './Header.jsx';
 import Footer from './Footer.jsx';
 import { MapPin, Clock, X } from 'lucide-react';

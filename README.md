@@ -70,6 +70,38 @@ npm run lint
 
 Ejecuta ESLint sobre el proyecto.
 
+### Pruebas
+
+```bash
+npm run test
+npm run test:coverage
+npm run test:e2e
+npm run test:all
+```
+
+Las pruebas unitarias e integracion usan Vitest y Testing Library. Las E2E usan Playwright con un backend mock local. La documentacion completa esta en `docs/testing/`.
+
+Para generar el informe PDF de pruebas:
+
+```bash
+npm run report:testing
+```
+
+Para generar el informe PDF de problemas detectados:
+
+```bash
+npm run report:problems
+```
+
+### SonarQube
+
+```bash
+npm run test:coverage
+npm run sonar -- --define sonar.host.url=http://127.0.0.1:9000 --define sonar.token=<TOKEN>
+```
+
+El analisis requiere un servidor SonarQube accesible y un token valido.
+
 ## Estructura del proyecto
 
 ```text

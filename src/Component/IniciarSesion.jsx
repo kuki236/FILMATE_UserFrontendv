@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Mail, Lock, CheckCircle } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import { loginUser } from './filmateApi';
@@ -13,9 +13,9 @@ export const IniciarSesion = () => {
   const [successLabel, setSuccessLabel] = useState('');
   const navigate = useNavigate();
 
-  const goToMenu = () => {
+  const goToMenu = useCallback(() => {
     navigate('/menuPrincipal', { replace: true });
-  };
+  }, [navigate]);
 
   const getFriendlyLoginError = (err) => {
     const rawMessage = typeof err === 'string'
@@ -45,7 +45,7 @@ export const IniciarSesion = () => {
     return message;
   };
 
-  const completeLogin = (label, isGuest = false) => {
+  const completeLogin = useCallback((label, isGuest = false) => {
     setSuccessLabel(label);
     setShowSuccess(true);
 
@@ -56,9 +56,9 @@ export const IniciarSesion = () => {
 
       goToMenu();
     }, 2000);
-  };
+  }, [goToMenu]);
 
-  const handleLogin = async () => {
+  const handleLogin = useCallback(async () => {
     setError('');
 
     const correo = email.trim();
@@ -82,7 +82,7 @@ export const IniciarSesion = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [completeLogin, email, password]);
 
   const handleGuest = () => {
     setError('');
@@ -98,10 +98,11 @@ export const IniciarSesion = () => {
 
     window.addEventListener('keydown', handleKeyPress);
     return () => window.removeEventListener('keydown', handleKeyPress);
-  }, [email, password]);
+  }, [handleLogin]);
 
   return (
-    <div className="h-screen overflow-hidden bg-gradient-to-br from-slate-900 via-blue-950 to-slate-900 flex items-center justify-center p-3 relative">
+    <main className="h-screen overflow-hidden bg-gradient-to-br from-slate-900 via-blue-950 to-slate-900 flex items-center justify-center p-3 relative">
+      <h1 className="sr-only">Filmate</h1>
       <div className="absolute top-24 left-12 opacity-10 hidden xl:block pointer-events-none">
         <img src="/popcorn.png" alt="" className="w-48 h-48 object-contain" />
       </div>
@@ -146,10 +147,11 @@ export const IniciarSesion = () => {
           )}
 
           <div className="mb-4">
-            <label className="flex items-center text-white font-medium mb-2 text-sm sm:text-base">
+            <label htmlFor="login-email" className="flex items-center text-white font-medium mb-2 text-sm sm:text-base">
               <Mail className="w-4 h-4 text-red-500 mr-2" /> Correo electrónico
             </label>
             <input
+              id="login-email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               className="w-full px-4 py-2.5 bg-slate-700/50 border border-slate-600 rounded-xl text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-transparent transition-all"
@@ -158,10 +160,11 @@ export const IniciarSesion = () => {
           </div>
 
           <div className="mb-4">
-            <label className="flex items-center text-white font-medium mb-2 text-sm sm:text-base">
+            <label htmlFor="login-password" className="flex items-center text-white font-medium mb-2 text-sm sm:text-base">
               <Lock className="w-4 h-4 text-red-500 mr-2" /> Contraseña
             </label>
             <input
+              id="login-password"
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
@@ -180,10 +183,8 @@ export const IniciarSesion = () => {
 
           <p className="text-center mt-3 text-xs sm:text-sm text-gray-400">
             No tienes cuenta?{' '}
-            <Link to="/registro">
-              <button className="text-red-500 hover:text-red-400 font-semibold transition-colors">
-                Regístrate
-              </button>
+            <Link to="/registro" className="text-red-500 hover:text-red-400 font-semibold transition-colors">
+              Regístrate
             </Link>
             {' '}o{' '}
             <button onClick={handleGuest} className="text-red-500 hover:text-red-400 font-semibold transition-colors">
@@ -257,7 +258,7 @@ export const IniciarSesion = () => {
           animation-fill-mode: forwards;
         }
       `}</style>
-    </div>
+    </main>
   );
 };
 

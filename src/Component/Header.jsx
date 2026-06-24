@@ -71,6 +71,8 @@ export const Header = () => {
             <div className="flex items-center gap-3 justify-end min-w-[3rem]">
               {/* Botón hamburguesa (solo móvil) */}
               <button
+                aria-label={mobileOpen ? 'Cerrar menu' : 'Abrir menu'}
+                aria-expanded={mobileOpen}
                 className="md:hidden p-2 rounded-full hover:bg-slate-800 transition-colors"
                 onClick={() => setMobileOpen((prev) => !prev)}
               >

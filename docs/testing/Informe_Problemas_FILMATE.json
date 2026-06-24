@@ -1,0 +1,653 @@
+{
+  "generatedAt": "2026-06-23T22:51:35.879Z",
+  "total": 64,
+  "rules": {
+    "javascript:S6848": 7,
+    "javascript:S1082": 9,
+    "filmate:A11Y003": 15,
+    "filmate:A11Y002": 30,
+    "filmate:A11Y001": 3
+  },
+  "issues": [
+    {
+      "rule": "javascript:S6848",
+      "file": "src/Component/Cines.jsx",
+      "line": 93,
+      "column": 18,
+      "element": "div",
+      "message": "<div> has an interactive handler but is not a native interactive element.",
+      "recommendation": "Replace it with a button/link or add role, tabIndex and keyboard handling.",
+      "snippet": "<div className=\"cursor-pointer\" onClick={() => handleMapClick(cine)}>"
+    },
+    {
+      "rule": "javascript:S1082",
+      "file": "src/Component/Cines.jsx",
+      "line": 93,
+      "column": 18,
+      "element": "div",
+      "message": "<div> handles click events without an equivalent keyboard event.",
+      "recommendation": "Add onKeyDown/onKeyUp handling or convert the element to a native button/link.",
+      "snippet": "<div className=\"cursor-pointer\" onClick={() => handleMapClick(cine)}>"
+    },
+    {
+      "rule": "filmate:A11Y003",
+      "file": "src/Component/Cines.jsx",
+      "line": 151,
+      "column": 8,
+      "element": "div",
+      "message": "Visual modal overlay does not expose dialog semantics.",
+      "recommendation": "Add role=\"dialog\", aria-modal=\"true\" and connect the dialog title with aria-labelledby.",
+      "snippet": "<div className=\"fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4\">"
+    },
+    {
+      "rule": "filmate:A11Y002",
+      "file": "src/Component/Cines.jsx",
+      "line": 155,
+      "column": 14,
+      "element": "button",
+      "message": "Icon-only button has no accessible name.",
+      "recommendation": "Add aria-label or visible text that explains the action.",
+      "snippet": "<button"
+    },
+    {
+      "rule": "filmate:A11Y003",
+      "file": "src/Component/DetallePelicula.jsx",
+      "line": 831,
+      "column": 12,
+      "element": "div",
+      "message": "Visual modal overlay does not expose dialog semantics.",
+      "recommendation": "Add role=\"dialog\", aria-modal=\"true\" and connect the dialog title with aria-labelledby.",
+      "snippet": "<div className=\"fixed inset-0 z-[70] flex items-end justify-center bg-black/75 p-3 sm:items-center sm:p-4\">"
+    },
+    {
+      "rule": "filmate:A11Y003",
+      "file": "src/Component/DetallePelicula.jsx",
+      "line": 892,
+      "column": 12,
+      "element": "div",
+      "message": "Visual modal overlay does not expose dialog semantics.",
+      "recommendation": "Add role=\"dialog\", aria-modal=\"true\" and connect the dialog title with aria-labelledby.",
+      "snippet": "<div className=\"fixed inset-0 z-[60] bg-[#020b16] text-white\">"
+    },
+    {
+      "rule": "filmate:A11Y002",
+      "file": "src/Component/DetallePelicula.jsx",
+      "line": 1104,
+      "column": 20,
+      "element": "button",
+      "message": "Icon-only button has no accessible name.",
+      "recommendation": "Add aria-label or visible text that explains the action.",
+      "snippet": "<button"
+    },
+    {
+      "rule": "filmate:A11Y002",
+      "file": "src/Component/DetallePelicula.jsx",
+      "line": 1240,
+      "column": 48,
+      "element": "button",
+      "message": "Icon-only button has no accessible name.",
+      "recommendation": "Add aria-label or visible text that explains the action.",
+      "snippet": "<button"
+    },
+    {
+      "rule": "javascript:S6848",
+      "file": "src/Component/DetallePelicula.jsx",
+      "line": 1341,
+      "column": 20,
+      "element": "div",
+      "message": "<div> has an interactive handler but is not a native interactive element.",
+      "recommendation": "Replace it with a button/link or add role, tabIndex and keyboard handling.",
+      "snippet": "<div"
+    },
+    {
+      "rule": "javascript:S1082",
+      "file": "src/Component/DetallePelicula.jsx",
+      "line": 1341,
+      "column": 20,
+      "element": "div",
+      "message": "<div> handles click events without an equivalent keyboard event.",
+      "recommendation": "Add onKeyDown/onKeyUp handling or convert the element to a native button/link.",
+      "snippet": "<div"
+    },
+    {
+      "rule": "filmate:A11Y003",
+      "file": "src/Component/DetallePelicula.jsx",
+      "line": 1341,
+      "column": 20,
+      "element": "div",
+      "message": "Visual modal overlay does not expose dialog semantics.",
+      "recommendation": "Add role=\"dialog\", aria-modal=\"true\" and connect the dialog title with aria-labelledby.",
+      "snippet": "<div"
+    },
+    {
+      "rule": "javascript:S6848",
+      "file": "src/Component/DetallePelicula.jsx",
+      "line": 1345,
+      "column": 24,
+      "element": "div",
+      "message": "<div> has an interactive handler but is not a native interactive element.",
+      "recommendation": "Replace it with a button/link or add role, tabIndex and keyboard handling.",
+      "snippet": "<div"
+    },
+    {
+      "rule": "javascript:S1082",
+      "file": "src/Component/DetallePelicula.jsx",
+      "line": 1345,
+      "column": 24,
+      "element": "div",
+      "message": "<div> handles click events without an equivalent keyboard event.",
+      "recommendation": "Add onKeyDown/onKeyUp handling or convert the element to a native button/link.",
+      "snippet": "<div"
+    },
+    {
+      "rule": "filmate:A11Y002",
+      "file": "src/Component/DetallePelicula.jsx",
+      "line": 1354,
+      "column": 32,
+      "element": "button",
+      "message": "Icon-only button has no accessible name.",
+      "recommendation": "Add aria-label or visible text that explains the action.",
+      "snippet": "<button"
+    },
+    {
+      "rule": "javascript:S6848",
+      "file": "src/Component/DetallePelicula.jsx",
+      "line": 1408,
+      "column": 20,
+      "element": "div",
+      "message": "<div> has an interactive handler but is not a native interactive element.",
+      "recommendation": "Replace it with a button/link or add role, tabIndex and keyboard handling.",
+      "snippet": "<div className=\"fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4\""
+    },
+    {
+      "rule": "javascript:S1082",
+      "file": "src/Component/DetallePelicula.jsx",
+      "line": 1408,
+      "column": 20,
+      "element": "div",
+      "message": "<div> handles click events without an equivalent keyboard event.",
+      "recommendation": "Add onKeyDown/onKeyUp handling or convert the element to a native button/link.",
+      "snippet": "<div className=\"fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4\""
+    },
+    {
+      "rule": "filmate:A11Y003",
+      "file": "src/Component/DetallePelicula.jsx",
+      "line": 1408,
+      "column": 20,
+      "element": "div",
+      "message": "Visual modal overlay does not expose dialog semantics.",
+      "recommendation": "Add role=\"dialog\", aria-modal=\"true\" and connect the dialog title with aria-labelledby.",
+      "snippet": "<div className=\"fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4\""
+    },
+    {
+      "rule": "javascript:S6848",
+      "file": "src/Component/DetallePelicula.jsx",
+      "line": 1411,
+      "column": 24,
+      "element": "div",
+      "message": "<div> has an interactive handler but is not a native interactive element.",
+      "recommendation": "Replace it with a button/link or add role, tabIndex and keyboard handling.",
+      "snippet": "<div"
+    },
+    {
+      "rule": "javascript:S1082",
+      "file": "src/Component/DetallePelicula.jsx",
+      "line": 1411,
+      "column": 24,
+      "element": "div",
+      "message": "<div> handles click events without an equivalent keyboard event.",
+      "recommendation": "Add onKeyDown/onKeyUp handling or convert the element to a native button/link.",
+      "snippet": "<div"
+    },
+    {
+      "rule": "filmate:A11Y002",
+      "file": "src/Component/DetallePelicula.jsx",
+      "line": 1417,
+      "column": 32,
+      "element": "button",
+      "message": "Icon-only button has no accessible name.",
+      "recommendation": "Add aria-label or visible text that explains the action.",
+      "snippet": "<button"
+    },
+    {
+      "rule": "filmate:A11Y003",
+      "file": "src/Component/Dulceria.jsx",
+      "line": 169,
+      "column": 4,
+      "element": "div",
+      "message": "Visual modal overlay does not expose dialog semantics.",
+      "recommendation": "Add role=\"dialog\", aria-modal=\"true\" and connect the dialog title with aria-labelledby.",
+      "snippet": "<div className=\"fixed inset-0 z-50 flex items-end justify-center bg-black/70 p-3 sm:items-center sm:p-4\">"
+    },
+    {
+      "rule": "filmate:A11Y002",
+      "file": "src/Component/Dulceria.jsx",
+      "line": 173,
+      "column": 10,
+      "element": "button",
+      "message": "Icon-only button has no accessible name.",
+      "recommendation": "Add aria-label or visible text that explains the action.",
+      "snippet": "<button"
+    },
+    {
+      "rule": "filmate:A11Y002",
+      "file": "src/Component/Dulceria.jsx",
+      "line": 197,
+      "column": 18,
+      "element": "button",
+      "message": "Icon-only button has no accessible name.",
+      "recommendation": "Add aria-label or visible text that explains the action.",
+      "snippet": "<button"
+    },
+    {
+      "rule": "filmate:A11Y002",
+      "file": "src/Component/Dulceria.jsx",
+      "line": 204,
+      "column": 18,
+      "element": "button",
+      "message": "Icon-only button has no accessible name.",
+      "recommendation": "Add aria-label or visible text that explains the action.",
+      "snippet": "<button"
+    },
+    {
+      "rule": "filmate:A11Y003",
+      "file": "src/Component/Dulceria.jsx",
+      "line": 268,
+      "column": 4,
+      "element": "div",
+      "message": "Visual modal overlay does not expose dialog semantics.",
+      "recommendation": "Add role=\"dialog\", aria-modal=\"true\" and connect the dialog title with aria-labelledby.",
+      "snippet": "<div className=\"fixed inset-0 z-50 flex items-end justify-center bg-black/70 p-3 sm:items-center sm:p-4\">"
+    },
+    {
+      "rule": "filmate:A11Y002",
+      "file": "src/Component/Dulceria.jsx",
+      "line": 272,
+      "column": 10,
+      "element": "button",
+      "message": "Icon-only button has no accessible name.",
+      "recommendation": "Add aria-label or visible text that explains the action.",
+      "snippet": "<button"
+    },
+    {
+      "rule": "filmate:A11Y002",
+      "file": "src/Component/Dulceria.jsx",
+      "line": 321,
+      "column": 16,
+      "element": "button",
+      "message": "Icon-only button has no accessible name.",
+      "recommendation": "Add aria-label or visible text that explains the action.",
+      "snippet": "<button"
+    },
+    {
+      "rule": "filmate:A11Y002",
+      "file": "src/Component/Dulceria.jsx",
+      "line": 375,
+      "column": 12,
+      "element": "button",
+      "message": "Icon-only button has no accessible name.",
+      "recommendation": "Add aria-label or visible text that explains the action.",
+      "snippet": "<button"
+    },
+    {
+      "rule": "filmate:A11Y003",
+      "file": "src/Component/Dulceria.jsx",
+      "line": 393,
+      "column": 4,
+      "element": "div",
+      "message": "Visual modal overlay does not expose dialog semantics.",
+      "recommendation": "Add role=\"dialog\", aria-modal=\"true\" and connect the dialog title with aria-labelledby.",
+      "snippet": "<div className=\"fixed inset-0 z-[60] flex items-end justify-center bg-black/80 p-3 sm:items-center sm:p-4\">"
+    },
+    {
+      "rule": "filmate:A11Y002",
+      "file": "src/Component/Dulceria.jsx",
+      "line": 425,
+      "column": 12,
+      "element": "button",
+      "message": "Icon-only button has no accessible name.",
+      "recommendation": "Add aria-label or visible text that explains the action.",
+      "snippet": "<button"
+    },
+    {
+      "rule": "filmate:A11Y003",
+      "file": "src/Component/Dulceria.jsx",
+      "line": 440,
+      "column": 4,
+      "element": "div",
+      "message": "Visual modal overlay does not expose dialog semantics.",
+      "recommendation": "Add role=\"dialog\", aria-modal=\"true\" and connect the dialog title with aria-labelledby.",
+      "snippet": "<div className=\"fixed inset-0 z-[70] flex items-end justify-center bg-black/80 p-3 sm:items-center sm:p-4\">"
+    },
+    {
+      "rule": "filmate:A11Y003",
+      "file": "src/Component/Dulceria.jsx",
+      "line": 481,
+      "column": 4,
+      "element": "div",
+      "message": "Visual modal overlay does not expose dialog semantics.",
+      "recommendation": "Add role=\"dialog\", aria-modal=\"true\" and connect the dialog title with aria-labelledby.",
+      "snippet": "<div className=\"fixed inset-0 z-50 flex items-end justify-center bg-black/70 p-3 sm:items-center sm:p-4\">"
+    },
+    {
+      "rule": "filmate:A11Y002",
+      "file": "src/Component/Dulceria.jsx",
+      "line": 483,
+      "column": 8,
+      "element": "button",
+      "message": "Icon-only button has no accessible name.",
+      "recommendation": "Add aria-label or visible text that explains the action.",
+      "snippet": "<button"
+    },
+    {
+      "rule": "filmate:A11Y002",
+      "file": "src/Component/Dulceria.jsx",
+      "line": 504,
+      "column": 12,
+      "element": "button",
+      "message": "Icon-only button has no accessible name.",
+      "recommendation": "Add aria-label or visible text that explains the action.",
+      "snippet": "<button"
+    },
+    {
+      "rule": "filmate:A11Y002",
+      "file": "src/Component/Dulceria.jsx",
+      "line": 510,
+      "column": 12,
+      "element": "button",
+      "message": "Icon-only button has no accessible name.",
+      "recommendation": "Add aria-label or visible text that explains the action.",
+      "snippet": "<button"
+    },
+    {
+      "rule": "filmate:A11Y002",
+      "file": "src/Component/Dulceria.jsx",
+      "line": 1208,
+      "column": 26,
+      "element": "button",
+      "message": "Icon-only button has no accessible name.",
+      "recommendation": "Add aria-label or visible text that explains the action.",
+      "snippet": "<button"
+    },
+    {
+      "rule": "filmate:A11Y002",
+      "file": "src/Component/Dulceria.jsx",
+      "line": 1215,
+      "column": 26,
+      "element": "button",
+      "message": "Icon-only button has no accessible name.",
+      "recommendation": "Add aria-label or visible text that explains the action.",
+      "snippet": "<button"
+    },
+    {
+      "rule": "filmate:A11Y002",
+      "file": "src/Component/Footer.jsx",
+      "line": 39,
+      "column": 18,
+      "element": "button",
+      "message": "Icon-only button has no accessible name.",
+      "recommendation": "Add aria-label or visible text that explains the action.",
+      "snippet": "<button"
+    },
+    {
+      "rule": "filmate:A11Y001",
+      "file": "src/Component/Header.jsx",
+      "line": 55,
+      "column": 18,
+      "element": "Link",
+      "message": "<Link> contains another interactive control.",
+      "recommendation": "Keep only one interactive element; style the outer control directly.",
+      "snippet": "<Link key={item.path} to={item.path}>"
+    },
+    {
+      "rule": "filmate:A11Y002",
+      "file": "src/Component/Header.jsx",
+      "line": 56,
+      "column": 20,
+      "element": "button",
+      "message": "Icon-only button has no accessible name.",
+      "recommendation": "Add aria-label or visible text that explains the action.",
+      "snippet": "<button"
+    },
+    {
+      "rule": "filmate:A11Y001",
+      "file": "src/Component/Header.jsx",
+      "line": 103,
+      "column": 16,
+      "element": "Link",
+      "message": "<Link> contains another interactive control.",
+      "recommendation": "Keep only one interactive element; style the outer control directly.",
+      "snippet": "<Link"
+    },
+    {
+      "rule": "filmate:A11Y002",
+      "file": "src/Component/Header.jsx",
+      "line": 108,
+      "column": 18,
+      "element": "button",
+      "message": "Icon-only button has no accessible name.",
+      "recommendation": "Add aria-label or visible text that explains the action.",
+      "snippet": "<button"
+    },
+    {
+      "rule": "filmate:A11Y003",
+      "file": "src/Component/Header.jsx",
+      "line": 138,
+      "column": 8,
+      "element": "div",
+      "message": "Visual modal overlay does not expose dialog semantics.",
+      "recommendation": "Add role=\"dialog\", aria-modal=\"true\" and connect the dialog title with aria-labelledby.",
+      "snippet": "<div className=\"fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm animate-fadeIn\">"
+    },
+    {
+      "rule": "filmate:A11Y003",
+      "file": "src/Component/IniciarSesion.jsx",
+      "line": 114,
+      "column": 8,
+      "element": "div",
+      "message": "Visual modal overlay does not expose dialog semantics.",
+      "recommendation": "Add role=\"dialog\", aria-modal=\"true\" and connect the dialog title with aria-labelledby.",
+      "snippet": "<div className=\"fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm animate-fadeIn\">"
+    },
+    {
+      "rule": "filmate:A11Y002",
+      "file": "src/Component/IniciarSesion.jsx",
+      "line": 176,
+      "column": 10,
+      "element": "button",
+      "message": "Icon-only button has no accessible name.",
+      "recommendation": "Add aria-label or visible text that explains the action.",
+      "snippet": "<button"
+    },
+    {
+      "rule": "javascript:S6848",
+      "file": "src/Component/MenuPrincipal.jsx",
+      "line": 387,
+      "column": 28,
+      "element": "div",
+      "message": "<div> has an interactive handler but is not a native interactive element.",
+      "recommendation": "Replace it with a button/link or add role, tabIndex and keyboard handling.",
+      "snippet": "<div"
+    },
+    {
+      "rule": "javascript:S1082",
+      "file": "src/Component/MenuPrincipal.jsx",
+      "line": 387,
+      "column": 28,
+      "element": "div",
+      "message": "<div> handles click events without an equivalent keyboard event.",
+      "recommendation": "Add onKeyDown/onKeyUp handling or convert the element to a native button/link.",
+      "snippet": "<div"
+    },
+    {
+      "rule": "javascript:S6848",
+      "file": "src/Component/MenuPrincipal.jsx",
+      "line": 519,
+      "column": 32,
+      "element": "div",
+      "message": "<div> has an interactive handler but is not a native interactive element.",
+      "recommendation": "Replace it with a button/link or add role, tabIndex and keyboard handling.",
+      "snippet": "<div"
+    },
+    {
+      "rule": "javascript:S1082",
+      "file": "src/Component/MenuPrincipal.jsx",
+      "line": 519,
+      "column": 32,
+      "element": "div",
+      "message": "<div> handles click events without an equivalent keyboard event.",
+      "recommendation": "Add onKeyDown/onKeyUp handling or convert the element to a native button/link.",
+      "snippet": "<div"
+    },
+    {
+      "rule": "filmate:A11Y003",
+      "file": "src/Component/Registro.jsx",
+      "line": 181,
+      "column": 8,
+      "element": "div",
+      "message": "Visual modal overlay does not expose dialog semantics.",
+      "recommendation": "Add role=\"dialog\", aria-modal=\"true\" and connect the dialog title with aria-labelledby.",
+      "snippet": "<div className=\"fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm animate-fadeIn\">"
+    },
+    {
+      "rule": "filmate:A11Y002",
+      "file": "src/Component/Registro.jsx",
+      "line": 316,
+      "column": 12,
+      "element": "button",
+      "message": "Icon-only button has no accessible name.",
+      "recommendation": "Add aria-label or visible text that explains the action.",
+      "snippet": "<button"
+    },
+    {
+      "rule": "filmate:A11Y001",
+      "file": "src/Component/Registro.jsx",
+      "line": 327,
+      "column": 12,
+      "element": "Link",
+      "message": "<Link> contains another interactive control.",
+      "recommendation": "Keep only one interactive element; style the outer control directly.",
+      "snippet": "<Link to=\"/\">"
+    },
+    {
+      "rule": "filmate:A11Y002",
+      "file": "src/Component/Social.jsx",
+      "line": 369,
+      "column": 20,
+      "element": "button",
+      "message": "Icon-only button has no accessible name.",
+      "recommendation": "Add aria-label or visible text that explains the action.",
+      "snippet": "<button"
+    },
+    {
+      "rule": "filmate:A11Y002",
+      "file": "src/Component/Social.jsx",
+      "line": 452,
+      "column": 32,
+      "element": "button",
+      "message": "Icon-only button has no accessible name.",
+      "recommendation": "Add aria-label or visible text that explains the action.",
+      "snippet": "<button"
+    },
+    {
+      "rule": "filmate:A11Y002",
+      "file": "src/Component/Social.jsx",
+      "line": 518,
+      "column": 14,
+      "element": "button",
+      "message": "Icon-only button has no accessible name.",
+      "recommendation": "Add aria-label or visible text that explains the action.",
+      "snippet": "<button"
+    },
+    {
+      "rule": "filmate:A11Y002",
+      "file": "src/Component/SocialEditarPerfil.jsx",
+      "line": 383,
+      "column": 18,
+      "element": "button",
+      "message": "Icon-only button has no accessible name.",
+      "recommendation": "Add aria-label or visible text that explains the action.",
+      "snippet": "<button"
+    },
+    {
+      "rule": "filmate:A11Y002",
+      "file": "src/Component/SocialEditarPerfil.jsx",
+      "line": 515,
+      "column": 16,
+      "element": "button",
+      "message": "Icon-only button has no accessible name.",
+      "recommendation": "Add aria-label or visible text that explains the action.",
+      "snippet": "<button"
+    },
+    {
+      "rule": "filmate:A11Y003",
+      "file": "src/Component/SocialEditarPerfil.jsx",
+      "line": 531,
+      "column": 8,
+      "element": "div",
+      "message": "Visual modal overlay does not expose dialog semantics.",
+      "recommendation": "Add role=\"dialog\", aria-modal=\"true\" and connect the dialog title with aria-labelledby.",
+      "snippet": "<div className=\"fixed inset-0 z-[60] flex items-center justify-center bg-black/75 px-4 py-6 backdrop-blur-sm\">"
+    },
+    {
+      "rule": "filmate:A11Y003",
+      "file": "src/Component/SocialEditarPerfil.jsx",
+      "line": 612,
+      "column": 8,
+      "element": "div",
+      "message": "Visual modal overlay does not expose dialog semantics.",
+      "recommendation": "Add role=\"dialog\", aria-modal=\"true\" and connect the dialog title with aria-labelledby.",
+      "snippet": "<div className=\"fixed inset-0 z-[60] flex items-center justify-center bg-black/75 px-4 py-6 backdrop-blur-sm\">"
+    },
+    {
+      "rule": "filmate:A11Y002",
+      "file": "src/Component/SocialEditarPerfil.jsx",
+      "line": 655,
+      "column": 20,
+      "element": "button",
+      "message": "Icon-only button has no accessible name.",
+      "recommendation": "Add aria-label or visible text that explains the action.",
+      "snippet": "<button"
+    },
+    {
+      "rule": "filmate:A11Y002",
+      "file": "src/Component/SocialPelicula.jsx",
+      "line": 161,
+      "column": 16,
+      "element": "button",
+      "message": "Icon-only button has no accessible name.",
+      "recommendation": "Add aria-label or visible text that explains the action.",
+      "snippet": "<button"
+    },
+    {
+      "rule": "javascript:S1082",
+      "file": "src/Component/SocialPelicula.jsx",
+      "line": 195,
+      "column": 20,
+      "element": "div",
+      "message": "<div> uses mouse-leave behavior without a matching blur event.",
+      "recommendation": "Pair mouse-leave behavior with onBlur for keyboard users.",
+      "snippet": "<div className=\"mt-2 flex w-fit gap-2\" onMouseLeave={() => setHoveredRating(0)}>"
+    },
+    {
+      "rule": "javascript:S1082",
+      "file": "src/Component/SocialPelicula.jsx",
+      "line": 201,
+      "column": 26,
+      "element": "button",
+      "message": "<button> uses hover behavior without a matching focus event.",
+      "recommendation": "Pair hover behavior with onFocus for keyboard users.",
+      "snippet": "<button"
+    },
+    {
+      "rule": "filmate:A11Y002",
+      "file": "src/Component/SocialPelicula.jsx",
+      "line": 235,
+      "column": 18,
+      "element": "button",
+      "message": "Icon-only button has no accessible name.",
+      "recommendation": "Add aria-label or visible text that explains the action.",
+      "snippet": "<button"
+    }
+  ]
+}

@@ -7,7 +7,16 @@
     "dev": "vite",
     "build": "vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "test:e2e": "node scripts/e2e/run-playwright.mjs",
+    "test:e2e:headed": "node scripts/e2e/run-playwright.mjs --headed",
+    "test:all": "npm run lint && npm run test:coverage && npm run build && npm run test:e2e",
+    "report:testing": "node scripts/testing/generate-testing-report.mjs",
+    "report:problems": "node scripts/testing/generate-problem-report.mjs",
+    "sonar": "sonar-scanner"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.3.0",
@@ -21,15 +30,24 @@
     "tailwindcss": "^4.3.0"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.12.1",
     "@eslint/js": "^10.0.1",
+    "@playwright/test": "^1.61.1",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
+    "@testing-library/user-event": "^14.6.1",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.1",
+    "@vitest/coverage-v8": "^4.1.9",
     "eslint": "^10.3.0",
     "eslint-plugin-react-hooks": "^7.1.1",
     "eslint-plugin-react-refresh": "^0.5.2",
     "globals": "^17.6.0",
+    "jsdom": "^29.1.1",
     "playwright-core": "^1.61.0",
-    "vite": "^8.0.12"
+    "sonar-scanner": "^3.1.0",
+    "vite": "^8.0.12",
+    "vitest": "^4.1.9"
   }
 }
