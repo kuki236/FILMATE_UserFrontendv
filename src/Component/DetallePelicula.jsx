@@ -4,7 +4,7 @@ import Header from './Header.jsx';
 import Footer from './Footer.jsx';
 import StarRatingDisplay from './StarRatingDisplay.jsx';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
-import { createSeatWebSocket, getCinemas, getMovieById, getMovieReviews, getRoomById, getRooms, getSeatMap, getShowtimesByDate, normalizeSeat } from './filmateApi';
+import { createSeatWebSocket, getCinemas, getMovieById, getMovieReviews, getRoomById, getRooms, getSeatMap, getShowtimesByDate, getSystemConfig, normalizeSeat } from './filmateApi';
 
 const FALLBACK_MEDIA_IMAGE =
     "data:image/svg+xml;charset=UTF-8," +
@@ -302,6 +302,7 @@ export const DetallePelicula = () => {
     const [reviews, setReviews] = useState([]);
     const [reviewsLoading, setReviewsLoading] = useState(Boolean(movieId));
     const [reviewsError, setReviewsError] = useState('');
+    const [systemConfig, setSystemConfig] = useState({ limiteAsientosPorTransaccion: 10 });
     const location = useLocation();
     const navigate = useNavigate();
     const seatGridRef = useRef(null);
@@ -323,6 +324,22 @@ export const DetallePelicula = () => {
 
     useEffect(() => {
         window.scrollTo(0, 0);
+    }, []);
+
+    useEffect(() => {
+        let isMounted = true;
+
+        getSystemConfig()
+            .then((config) => {
+                if (isMounted) setSystemConfig(config);
+            })
+            .catch(() => {
+                if (isMounted) setSystemConfig({ limiteAsientosPorTransaccion: 10 });
+            });
+
+        return () => {
+            isMounted = false;
+        };
     }, []);
 
     useEffect(() => {
@@ -756,12 +773,21 @@ export const DetallePelicula = () => {
 
     const toggleSeat = (seat) => {
         if (!seat || seat.estado !== 'Disponible') return;
+        const seatLimit = Number(systemConfig.limiteAsientosPorTransaccion || 10);
 
-        setSelectedSeats((prev) =>
-            prev.some((item) => item.id_asiento === seat.id_asiento)
-                ? prev.filter((item) => item.id_asiento !== seat.id_asiento)
-                : [...prev, seat]
-        );
+        setSelectedSeats((prev) => {
+            if (prev.some((item) => item.id_asiento === seat.id_asiento)) {
+                return prev.filter((item) => item.id_asiento !== seat.id_asiento);
+            }
+
+            if (prev.length >= seatLimit) {
+                setSeatMapError(`Puedes seleccionar como máximo ${seatLimit} asientos por compra.`);
+                return prev;
+            }
+
+            setSeatMapError('');
+            return [...prev, seat];
+        });
     };
 
     const goToDulceria = () => {

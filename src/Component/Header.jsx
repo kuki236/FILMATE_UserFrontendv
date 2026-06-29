@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import { ChevronDown, LogOut, Menu, ReceiptText, ShoppingBag, Ticket, X } from 'lucide-react';
+import { QRCodeCanvas } from 'qrcode.react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { clearAuthSession, getAuthSession, isRegisteredSession } from './authSession';
+import { getUserPurchases } from './filmateApi';
 import { getSessionUserId, PURCHASE_HISTORY_UPDATED, readPurchaseHistory } from './purchaseHistory';
 
 const formatCurrency = (value) => `S/. ${Number(value || 0).toFixed(2)}`;
@@ -94,6 +96,29 @@ function PurchaseDetail({ purchase }) {
           <p className="mt-1 truncate text-white">{purchase.qrValue || 'No disponible'}</p>
         </div>
       </section>
+
+      {purchase.qrValue && (
+        <section className="rounded-xl border border-slate-800 bg-slate-900/70 p-4">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
+            <div className="w-fit rounded-xl bg-white p-3">
+              <QRCodeCanvas
+                value={purchase.qrValue}
+                size={156}
+                level="H"
+                includeMargin
+                fgColor="#0f172a"
+                bgColor="#ffffff"
+              />
+            </div>
+            <div>
+              <p className="text-base font-black text-white">Código QR de la compra</p>
+              <p className="mt-2 text-sm font-semibold leading-relaxed text-white/55">
+                Presenta este QR en el cine para validar entradas o recoger productos de dulcería.
+              </p>
+            </div>
+          </div>
+        </section>
+      )}
     </div>
   );
 }
@@ -126,13 +151,26 @@ export const Header = () => {
   const latestPurchases = useMemo(() => purchases.slice(0, 3), [purchases]);
 
   useEffect(() => {
-    const loadPurchases = () => setPurchases(readPurchaseHistory(sessionUserId));
+    let active = true;
+    const loadPurchases = async () => {
+      const localPurchases = readPurchaseHistory(sessionUserId);
+      setPurchases(localPurchases);
+
+      try {
+        const remotePurchases = await getUserPurchases(sessionUserId);
+        if (!active) return;
+        setPurchases(remotePurchases.length ? remotePurchases : localPurchases);
+      } catch {
+        if (active) setPurchases(localPurchases);
+      }
+    };
 
     loadPurchases();
     window.addEventListener(PURCHASE_HISTORY_UPDATED, loadPurchases);
     window.addEventListener('storage', loadPurchases);
 
     return () => {
+      active = false;
       window.removeEventListener(PURCHASE_HISTORY_UPDATED, loadPurchases);
       window.removeEventListener('storage', loadPurchases);
     };

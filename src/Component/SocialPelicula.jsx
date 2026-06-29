@@ -45,25 +45,10 @@ const mergeMovieDetails = (baseMovie, detailsMovie) => {
   return {
     ...baseMovie,
     ...detailsMovie,
-    totalVistas: baseMovie.totalVistas,
-    totalFavoritos: baseMovie.totalFavoritos,
+    totalVistas: detailsMovie.totalVistas ?? baseMovie.totalVistas,
+    totalFavoritos: detailsMovie.totalFavoritos ?? baseMovie.totalFavoritos,
+    totalResenas: detailsMovie.totalResenas ?? baseMovie.totalResenas,
   };
-};
-
-const ensureInteractionCounts = (movie, interaction) => {
-  if (!movie) return movie;
-
-  const nextMovie = { ...movie };
-
-  if (interaction?.vista) {
-    nextMovie.totalVistas = Math.max(1, Number(nextMovie.totalVistas || 0));
-  }
-
-  if (interaction?.favorita) {
-    nextMovie.totalFavoritos = Math.max(1, Number(nextMovie.totalFavoritos || 0));
-  }
-
-  return nextMovie;
 };
 
 const readCachedMovie = (movieId) => {
@@ -164,7 +149,7 @@ export const SocialPelicula = () => {
       setReviewsError('');
     }, 0);
 
-    getMovieReviews(movieId)
+    getMovieReviews(movieId, userId)
       .then((movieReviews) => {
         if (active) setReviews(movieReviews);
       })
@@ -179,28 +164,37 @@ export const SocialPelicula = () => {
       active = false;
       window.clearTimeout(loadingTimer);
     };
-  }, [movieId]);
+  }, [movieId, userId]);
 
   useEffect(() => {
     if (!userId || !movieId) return undefined;
 
     let active = true;
 
-    getMovieInteraction(userId, movieId)
-      .then((currentInteraction) => {
-        if (!active || !currentInteraction) return;
+    Promise.allSettled([
+      getMovieInteraction(userId, movieId),
+      getMovieById(movieId),
+    ])
+      .then(([interactionResult, movieResult]) => {
+        if (!active) return;
+
+        const currentInteraction =
+          interactionResult.status === 'fulfilled' ? interactionResult.value : null;
         const nextInteraction = {
-          vista: Boolean(currentInteraction.vista),
-          favorita: Boolean(currentInteraction.favorita),
-          en_lista_seguimiento: Boolean(currentInteraction.en_lista_seguimiento),
+          vista: Boolean(currentInteraction?.vista),
+          favorita: Boolean(currentInteraction?.favorita),
+          en_lista_seguimiento: Boolean(currentInteraction?.en_lista_seguimiento),
         };
 
         setInteraction(nextInteraction);
-        setMovie((currentMovie) => {
-          const nextMovie = ensureInteractionCounts(currentMovie, nextInteraction);
-          writeCachedMovie(movieId, nextMovie);
-          return nextMovie;
-        });
+
+        if (movieResult.status === 'fulfilled' && movieResult.value) {
+          setMovie((currentMovie) => {
+            const nextMovie = mergeMovieDetails(currentMovie, movieResult.value);
+            writeCachedMovie(movieId, nextMovie);
+            return nextMovie;
+          });
+        }
       })
       .catch(() => {
         if (active) setInteraction({ vista: false, favorita: false, en_lista_seguimiento: false });
@@ -240,32 +234,17 @@ export const SocialPelicula = () => {
         comentario: comment.trim(),
       });
 
-      const publishedReview = {
-        id: `local-${Date.now()}`,
-        userId,
-        usuario: `@${session?.user?.username || session?.user?.nombreUsuario || 'yo'}`,
-        avatar: session?.user?.url_perfil || '',
-        rating,
-        texto: comment.trim(),
-        fechaPublicacion: new Date().toISOString(),
-        likes: 0,
-        likedByMe: false,
-      };
+      const [nextReviews, nextMovie] = await Promise.all([
+        getMovieReviews(movieId, userId),
+        getMovieById(movieId),
+      ]);
 
+      setReviews(nextReviews);
       setMovie((currentMovie) => {
-        if (!currentMovie) return currentMovie;
-
-        const previousTotal = Number(currentMovie.totalResenas || 0);
-        const previousAverage = Number(currentMovie.rating || 0);
-        const nextTotal = previousTotal + 1;
-
-        return {
-          ...currentMovie,
-          totalResenas: nextTotal,
-          rating: Math.round((((previousAverage * previousTotal) + rating) / nextTotal) * 2) / 2,
-        };
+        const mergedMovie = mergeMovieDetails(currentMovie, nextMovie);
+        writeCachedMovie(movieId, mergedMovie);
+        return mergedMovie;
       });
-      setReviews((currentReviews) => [publishedReview, ...currentReviews]);
       setRating(0);
       setHoveredRating(0);
       setComment('');
@@ -301,19 +280,21 @@ export const SocialPelicula = () => {
         ...nextInteraction,
       });
 
-      if (field === 'vista' || field === 'favorita') {
-        setMovie((currentMovie) => {
-          if (!currentMovie) return currentMovie;
-          const key = field === 'vista' ? 'totalVistas' : 'totalFavoritos';
-          const delta = nextInteraction[field] ? 1 : -1;
-          const nextMovie = {
-            ...currentMovie,
-            [key]: Math.max(0, Number(currentMovie[key] || 0) + delta),
-          };
-          writeCachedMovie(movieId, nextMovie);
-          return nextMovie;
-        });
-      }
+      const [savedInteraction, nextMovie] = await Promise.all([
+        getMovieInteraction(userId, movieId),
+        getMovieById(movieId),
+      ]);
+
+      setInteraction({
+        vista: Boolean(savedInteraction?.vista),
+        favorita: Boolean(savedInteraction?.favorita),
+        en_lista_seguimiento: Boolean(savedInteraction?.en_lista_seguimiento),
+      });
+      setMovie((currentMovie) => {
+        const mergedMovie = mergeMovieDetails(currentMovie, nextMovie);
+        writeCachedMovie(movieId, mergedMovie);
+        return mergedMovie;
+      });
     } catch (error) {
       setInteraction(previousInteraction);
       setInteractionError(error?.message || 'No se pudo guardar la interaccion.');
@@ -342,8 +323,20 @@ export const SocialPelicula = () => {
 
     try {
       await likeMovieReview(reviewId, userId);
-    } catch {
-      // Feedback optimista mientras backend expone likes persistentes.
+      setReviews(await getMovieReviews(movieId, userId));
+    } catch (error) {
+      setReviews((currentReviews) =>
+        currentReviews.map((review) =>
+          review.id === reviewId
+            ? {
+                ...review,
+                likedByMe: !review.likedByMe,
+                likes: Math.max(0, Number(review.likes || 0) + (review.likedByMe ? -1 : 1)),
+              }
+            : review
+        )
+      );
+      setInteractionError(error?.message || 'No se pudo guardar el like.');
     }
   };
 
