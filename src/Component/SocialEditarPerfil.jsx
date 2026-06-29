@@ -128,7 +128,7 @@ export const SocialEditarPerfil = () => {
           const summary = summaryResult.value;
           const nextProfile = summary.profile || sessionUser;
           const cachedFavorites = readProfileFavoritesCache(userId);
-          const nextFavorites = (cachedFavorites.length ? cachedFavorites : summary.favoriteMovies)
+          const nextFavorites = (summary.favoriteMovies.length ? summary.favoriteMovies : cachedFavorites)
             .filter((movie) => selectableIds.has(String(movie.id)))
             .slice(0, MAX_FAVORITES);
 

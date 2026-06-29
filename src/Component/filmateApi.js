@@ -119,6 +119,45 @@ const asPayloadArray = (value, keys = []) => {
   return [];
 };
 
+const parseConfigValue = (value, type = '') => {
+  if (value === undefined || value === null) return value;
+  if (type === 'number') return Number(value);
+  if (type === 'boolean') return value === true || value === 'true' || value === '1';
+  if (type === 'json') {
+    try {
+      return typeof value === 'string' ? JSON.parse(value) : value;
+    } catch {
+      return value;
+    }
+  }
+
+  return value;
+};
+
+const normalizeSystemConfig = (data) => {
+  const entries = asPayloadArray(data, ['results', 'configuracion', 'config', 'items']);
+  const configMap = entries.reduce((acc, item) => {
+    const key = item?.clave || item?.key || item?.nombre;
+    if (!key) return acc;
+
+    acc[key] = parseConfigValue(item.valor ?? item.value, item.tipo_dato || item.type);
+    return acc;
+  }, {});
+
+  const source = entries.length ? configMap : data || {};
+
+  return {
+    preciosFormato: source.precios_formato || source.preciosFormato || {},
+    tiposEntrada: source.tipos_entrada || source.tiposEntrada || [],
+    tasaServicio: Number(source.tasa_servicio ?? source.tasaServicio ?? 0),
+    ivaPorcentaje: Number(source.iva_porcentaje ?? source.ivaPorcentaje ?? 0),
+    limiteAsientosPorTransaccion: Number(source.limite_asientos_por_transaccion ?? source.limiteAsientosPorTransaccion ?? 10),
+    tiempoBloqueoAsientosMinutos: Number(source.tiempo_bloqueo_asientos_minutos ?? source.tiempoBloqueoAsientosMinutos ?? 10),
+    horasAnticipacionMinimas: Number(source.horas_anticipacion_minimas ?? source.horasAnticipacionMinimas ?? 1),
+    diasAnticipacionMaximos: Number(source.dias_anticipacion_maximos ?? source.diasAnticipacionMaximos ?? 7),
+  };
+};
+
 const formatDuration = (minutes) => {
   if (!minutes && minutes !== 0) return 'Por definir';
 
@@ -460,6 +499,122 @@ export function normalizeMovieReview(review, user = null) {
   };
 }
 
+export function normalizePurchase(purchase) {
+  if (!purchase) return null;
+
+  const transaction = purchase.transaccion || purchase.transaction || purchase;
+  const movie =
+    purchase.pelicula ||
+    purchase.movie ||
+    transaction.pelicula ||
+    transaction.movie ||
+    purchase.funcion?.pelicula ||
+    transaction.funcion?.pelicula ||
+    null;
+  const cinema =
+    purchase.cine ||
+    purchase.cinema ||
+    purchase.sede ||
+    transaction.cine ||
+    transaction.sede ||
+    purchase.funcion?.sala?.cine ||
+    transaction.funcion?.sala?.cine ||
+    null;
+  const room =
+    purchase.sala ||
+    purchase.room ||
+    transaction.sala ||
+    transaction.room ||
+    purchase.funcion?.sala ||
+    transaction.funcion?.sala ||
+    null;
+  const seats = asPayloadArray(
+    purchase.asientos ||
+      purchase.detalle_asientos ||
+      purchase.detalleBoletaAsientos ||
+      purchase.boletos_asientos ||
+      transaction.asientos,
+    ['results', 'asientos', 'items']
+  );
+  const snacks = asPayloadArray(
+    purchase.snacks ||
+      purchase.confiteria ||
+      purchase.detalle_confiteria ||
+      purchase.detalleBoletaConfiteria ||
+      transaction.snacks,
+    ['results', 'snacks', 'confiteria', 'items']
+  );
+  const tickets = asPayloadArray(
+    purchase.boletos ||
+      purchase.tickets ||
+      purchase.boletas ||
+      transaction.boletos ||
+      transaction.tickets,
+    ['results', 'boletos', 'tickets', 'items']
+  );
+  const qrToken =
+    purchase.codigo_qr_token ||
+    purchase.qrValue ||
+    purchase.qr ||
+    tickets.find((ticket) => ticket?.codigo_qr_token || ticket?.qrValue || ticket?.qr)?.codigo_qr_token ||
+    tickets.find((ticket) => ticket?.codigo_qr_token || ticket?.qrValue || ticket?.qr)?.qrValue ||
+    tickets.find((ticket) => ticket?.codigo_qr_token || ticket?.qrValue || ticket?.qr)?.qr ||
+    '';
+
+  const id = transaction.id_transaccion || transaction.id || purchase.id_ticket || purchase.id || qrToken;
+  const movieTitle = movie?.titulo || purchase.pelicula_titulo || purchase.titulo_pelicula || purchase.titulo || '';
+  const total = Number(
+    transaction.monto_total ??
+      purchase.monto_total ??
+      purchase.total ??
+      purchase.total_pago ??
+      0
+  );
+
+  return {
+    id: String(id || Date.now()),
+    transactionId: transaction.id_transaccion || transaction.id || null,
+    pedidoNumber: purchase.numero_pedido || purchase.pedidoNumber || transaction.id_transaccion || id,
+    createdAt:
+      transaction.fecha_transaccion ||
+      purchase.fecha_transaccion ||
+      purchase.fecha_compra ||
+      purchase.createdAt ||
+      purchase.fecha_emision ||
+      new Date().toISOString(),
+    method: transaction.metodo_pago || purchase.metodo_pago || purchase.method || 'Pago',
+    total,
+    type: movieTitle ? 'Reserva y dulceria' : 'Solo dulceria',
+    qrValue: qrToken || (id ? `FILMATE|TXN:${id}|TOTAL:${total.toFixed(2)}` : ''),
+    booking: movieTitle
+      ? {
+          pelicula: movieTitle,
+          sede: cinema?.nombre_cine || cinema?.nombre || purchase.nombre_cine || purchase.sede || '',
+          horario: purchase.funcion?.fecha_hora || transaction.funcion?.fecha_hora || purchase.fecha_hora || '',
+          sala: room?.nombre_sala || room?.nombre || purchase.nombre_sala || '',
+          asientos: seats
+            .map((seat) => seat?.codigo || seat?.nombre || [seat?.fila, seat?.columna].filter(Boolean).join('') || seat?.id_asiento)
+            .filter(Boolean),
+          seatIds: seats.map((seat) => seat?.id_asiento || seat?.id).filter(Boolean),
+          subtotal: Number(transaction.monto_boletos ?? purchase.monto_boletos ?? 0),
+        }
+      : null,
+    snacks: snacks.map((item) => {
+      const product = item.producto || item.product || item;
+      const cantidad = Number(item.cantidad || 1);
+      const precio = Number(item.precio_unitario ?? product.precio ?? item.precio ?? 0);
+
+      return {
+        id: product.id_producto || product.id || item.id_producto || item.id,
+        nombre: product.nombre_producto || product.nombre || item.nombre_producto || 'Producto',
+        cantidad,
+        precio,
+        subtotal: Number(item.subtotal ?? cantidad * precio),
+      };
+    }),
+  };
+}
+
 export async function getMovies({ skip = 0, limit = 50, generoId } = {}) {
   const query = new URLSearchParams();
   query.set('skip', String(skip));
@@ -499,10 +654,15 @@ export async function createMovieReview(payload) {
   });
 }
 
-export async function getMovieReviews(movieId) {
+export async function getMovieReviews(movieId, userId = null) {
   if (!movieId) return [];
 
-  const data = await request(`/client/reviews/movie/${movieId}`);
+  const query = userId ? `?id_usuario=${encodeURIComponent(userId)}` : '';
+  const data = await requestFirstAvailable([
+    `/client/reviews/movie/${movieId}${query}`,
+    `/client/resenas/movie/${movieId}${query}`,
+    `/client/reviews/movie/${movieId}`,
+  ]);
   const reviews = asPayloadArray(data, ['results', 'reviews', 'resenas', 'items']);
   const userIds = [
     ...new Set(
@@ -653,7 +813,12 @@ export async function checkoutOrder(payload) {
   const idsAsientos = payload.ids_asientos || payload.asientos || [];
   const snacks = payload.snacks || payload.confiteria || [];
 
-  return request('/client/orders/checkout', {
+  return requestFirstAvailable([
+    '/client/orders/checkout',
+    '/client/compras/checkout',
+    '/client/checkout',
+    '/client/orders/',
+  ], {
     method: 'POST',
     body: JSON.stringify({
       id_usuario: payload.id_usuario,
@@ -661,9 +826,25 @@ export async function checkoutOrder(payload) {
       ids_asientos: idsAsientos,
       snacks,
       monto_confiteria: payload.monto_confiteria || 0,
+      monto_boletos: payload.monto_boletos,
+      monto_subtotal: payload.monto_subtotal,
+      tasa_servicio: payload.tasa_servicio,
+      iva_monto: payload.iva_monto,
       metodo_pago: payload.metodo_pago,
     }),
   });
+}
+
+export async function getSystemConfig() {
+  const data = await requestFirstAvailable([
+    '/client/configuracion/sistema',
+    '/client/configuracion',
+    '/client/system/config',
+    '/admin/configuracion-sistema',
+    '/admin/configuracion',
+  ]);
+
+  return normalizeSystemConfig(data);
 }
 
 export async function registerUser(payload) {
@@ -853,6 +1034,27 @@ export async function updateMovieInteraction(payload) {
       en_lista_seguimiento: Boolean(payload.en_lista_seguimiento),
     }),
   });
+}
+
+export async function getUserPurchases(userId) {
+  if (!userId || userId === 'guest') return [];
+
+  const data = await requestFirstAvailable([
+    `/client/orders/user/${userId}`,
+    `/client/orders/history/${userId}`,
+    `/client/compras/usuario/${userId}`,
+    `/client/transacciones/usuario/${userId}`,
+    `/client/users/${userId}/purchases`,
+  ]);
+
+  return asPayloadArray(data, ['results', 'orders', 'compras', 'transacciones', 'items'])
+    .map(normalizePurchase)
+    .filter(Boolean)
+    .sort((first, second) => {
+      const firstDate = Date.parse(first.createdAt || '') || 0;
+      const secondDate = Date.parse(second.createdAt || '') || 0;
+      return secondDate - firstDate;
+    });
 }
 
 export async function getMovieInteraction(userId, movieId) {

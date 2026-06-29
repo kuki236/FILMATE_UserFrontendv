@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import Header from './Header.jsx';
-import { ChevronDown, Film, Heart, PencilLine, Plus, Search, Trash2, UserCheck, UserPlus, X } from 'lucide-react';
+import { ChevronDown, Eye, Film, Heart, MessageSquareText, PencilLine, Plus, Search, ThumbsUp, Trash2, UserCheck, UserPlus, X } from 'lucide-react';
 import { getAuthSession } from './authSession';
 import {
   API_BASE_URL,
@@ -12,8 +12,10 @@ import {
   getUserInteractions,
   getUserRatedMovies,
   getUserRatingDistribution,
+  getUserReviews,
   searchMovies,
   searchUsers,
+  unfollowUser,
 } from './filmateApi';
 
 const FALLBACK_POSTER = 'https://placehold.co/400x600/0f172a/f8fafc?text=Filmate';
@@ -33,6 +35,19 @@ const getRelatedUserId = (item) => (
   item?.usuario_seguido?.id ||
   getUserId(item)
 );
+
+const formatActivityDate = (value) => {
+  if (!value) return 'Fecha no disponible';
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return 'Fecha no disponible';
+
+  return new Intl.DateTimeFormat('es-PE', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+  }).format(date);
+};
 
 const getDisplayName = (user, isRegistered) => {
   if (!isRegistered) return 'Invitado';
@@ -110,6 +125,8 @@ export const Social = () => {
   const [collectionMoviesLoading, setCollectionMoviesLoading] = useState({});
   const [userReviews, setUserReviews] = useState([]);
   const [reviewsLoading, setReviewsLoading] = useState(false);
+  const [activityItems, setActivityItems] = useState([]);
+  const [activityLoading, setActivityLoading] = useState(false);
   const [interactionsMap, setInteractionsMap] = useState({});
   const [expandedReviews, setExpandedReviews] = useState({});
   const [showUnfollowConfirm, setShowUnfollowConfirm] = useState(false);
@@ -124,7 +141,6 @@ export const Social = () => {
   const [allMovies, setAllMovies] = useState([]);
   const [allMoviesLoading, setAllMoviesLoading] = useState(false);
   const [addMovieFilter, setAddMovieFilter] = useState('');
-  const [addingMovieIds, setAddingMovieIds] = useState({});
   const [pendingMovieIds, setPendingMovieIds] = useState(new Set());
   const [deleteCollectionConfirm, setDeleteCollectionConfirm] = useState(null);
   const [removeMovieConfirm, setRemoveMovieConfirm] = useState(null);
@@ -275,7 +291,9 @@ export const Social = () => {
     if (activeTab !== 'Películas' || !shouldLoadSocial || !viewedUserId) return;
 
     let active = true;
-    setWatchedLoading(true);
+    const loadingTimer = window.setTimeout(() => {
+      if (active) setWatchedLoading(true);
+    }, 0);
 
     getUserInteractions(viewedUserId)
       .then((interactions) => {
@@ -299,6 +317,7 @@ export const Social = () => {
 
     return () => {
       active = false;
+      window.clearTimeout(loadingTimer);
     };
   }, [activeTab, shouldLoadSocial, viewedUserId]);
 
@@ -306,7 +325,9 @@ export const Social = () => {
     if (activeTab !== 'Favoritos' || !shouldLoadSocial || !viewedUserId) return;
 
     let active = true;
-    setFavoriteTabLoading(true);
+    const loadingTimer = window.setTimeout(() => {
+      if (active) setFavoriteTabLoading(true);
+    }, 0);
 
     getUserInteractions(viewedUserId)
       .then((interactions) => {
@@ -330,6 +351,201 @@ export const Social = () => {
 
     return () => {
       active = false;
+      window.clearTimeout(loadingTimer);
+    };
+  }, [activeTab, shouldLoadSocial, viewedUserId]);
+
+  useEffect(() => {
+    if (activeTab !== 'Reseñas' || !shouldLoadSocial || !viewedUserId) return;
+
+    let active = true;
+    const loadingTimer = window.setTimeout(() => {
+      if (active) setReviewsLoading(true);
+    }, 0);
+
+    getUserReviews(viewedUserId)
+      .then((reviews) => {
+        if (!active) return;
+        setUserReviews(reviews);
+      })
+      .catch(() => {
+        if (active) setUserReviews([]);
+      })
+      .finally(() => {
+        if (active) setReviewsLoading(false);
+      });
+
+    return () => {
+      active = false;
+      window.clearTimeout(loadingTimer);
+    };
+  }, [activeTab, shouldLoadSocial, viewedUserId]);
+
+  useEffect(() => {
+    if (activeTab !== 'Actividad' || !shouldLoadSocial || !viewedUserId) return;
+
+    let active = true;
+    const loadingTimer = window.setTimeout(() => {
+      if (active) setActivityLoading(true);
+    }, 0);
+
+    Promise.allSettled([
+      getUserReviews(viewedUserId),
+      getUserInteractions(viewedUserId),
+      getFollowing(viewedUserId),
+    ])
+      .then(async ([reviewsResult, interactionsResult, followingResult]) => {
+        if (!active) return;
+
+        const reviews = reviewsResult.status === 'fulfilled' ? reviewsResult.value : [];
+        const interactions = interactionsResult.status === 'fulfilled' ? interactionsResult.value : [];
+        const following = followingResult.status === 'fulfilled' ? followingResult.value : [];
+        const movieIds = [
+          ...new Set(
+            interactions
+              .filter((item) => item.vista || item.favorita)
+              .map((item) => item.id_pelicula)
+              .filter(Boolean)
+              .map(String)
+          ),
+        ];
+        const movieEntries = await Promise.all(
+          movieIds.map(async (movieId) => {
+            try {
+              return [movieId, await getMovieById(movieId)];
+            } catch {
+              return [movieId, null];
+            }
+          })
+        );
+
+        if (!active) return;
+
+        const moviesById = Object.fromEntries(movieEntries);
+        const reviewActivities = reviews.map((review) => ({
+          id: `review-${review.id}`,
+          type: 'review',
+          icon: MessageSquareText,
+          title: `Reseno ${review.movie?.titulo || 'una pelicula'}`,
+          detail: review.texto || 'Sin comentario.',
+          date: review.fechaPublicacion,
+          movie: review.movie,
+        }));
+        const likeActivities = reviews
+          .filter((review) => Number(review.likes || 0) > 0)
+          .map((review) => ({
+            id: `review-like-${review.id}`,
+            type: 'like',
+            icon: ThumbsUp,
+            title: `${review.likes} ${Number(review.likes) === 1 ? 'like' : 'likes'} en su reseña`,
+            detail: review.movie?.titulo || review.texto || 'Reseña de la comunidad.',
+            date: review.fechaPublicacion,
+            movie: review.movie,
+          }));
+        const interactionActivities = interactions.flatMap((item) => {
+          const interactionMovie = moviesById[String(item.id_pelicula)];
+          const items = [];
+
+          if (item.favorita) {
+            items.push({
+              id: `favorite-${item.id_pelicula}`,
+              type: 'favorite',
+              icon: Heart,
+              title: `Marco como favorita ${interactionMovie?.titulo || 'una pelicula'}`,
+              detail: 'Agregada a su lista completa de favoritas.',
+              date: item.fecha_favorito || item.fecha_actualizacion || item.fecha_creacion,
+              movie: interactionMovie,
+            });
+          }
+
+          if (item.vista) {
+            items.push({
+              id: `watched-${item.id_pelicula}`,
+              type: 'watched',
+              icon: Eye,
+              title: `Marco como vista ${interactionMovie?.titulo || 'una pelicula'}`,
+              detail: 'Registrada en peliculas vistas.',
+              date: item.fecha_vista || item.fecha_actualizacion || item.fecha_creacion,
+              movie: interactionMovie,
+            });
+          }
+
+          return items;
+        });
+        const followingActivities = following.map((item) => {
+          const followedName =
+            item?.username ||
+            item?.seguido?.username ||
+            item?.usuario_seguido?.username ||
+            item?.nombre_usuario ||
+            `usuario ${getRelatedUserId(item) || ''}`.trim();
+
+          return {
+            id: `following-${getRelatedUserId(item) || followedName}`,
+            type: 'following',
+            icon: UserPlus,
+            title: `Comenzo a seguir a @${String(followedName).replace(/^@/, '')}`,
+            detail: 'Nueva conexion social.',
+            date: item.fecha_seguimiento || item.fecha_creacion,
+          };
+        });
+
+        setUserReviews(reviews);
+        setActivityItems([
+          ...reviewActivities,
+          ...likeActivities,
+          ...interactionActivities,
+          ...followingActivities,
+        ].sort((first, second) => {
+          const firstDate = Date.parse(first.date || '') || 0;
+          const secondDate = Date.parse(second.date || '') || 0;
+          return secondDate - firstDate;
+        }));
+      })
+      .catch(() => {
+        if (active) setActivityItems([]);
+      })
+      .finally(() => {
+        if (active) setActivityLoading(false);
+      });
+
+    return () => {
+      active = false;
+      window.clearTimeout(loadingTimer);
+    };
+  }, [activeTab, shouldLoadSocial, viewedUserId]);
+
+  useEffect(() => {
+    if (activeTab !== 'Favoritos' || !shouldLoadSocial || !viewedUserId) return;
+
+    let active = true;
+    const loadingTimer = window.setTimeout(() => {
+      if (active) setFavoriteTabLoading(true);
+    }, 0);
+
+    getUserInteractions(viewedUserId)
+      .then((interactions) => {
+        if (!active) return;
+        const favoriteIds = interactions
+          .filter((item) => item.favorita)
+          .map((item) => item.id_pelicula);
+
+        return Promise.all(favoriteIds.map((id) => getMovieById(id).catch(() => null)));
+      })
+      .then((movies) => {
+        if (!active) return;
+        setFavoriteTabMovies((movies || []).filter(Boolean));
+      })
+      .catch(() => {
+        if (active) setFavoriteTabMovies([]);
+      })
+      .finally(() => {
+        if (active) setFavoriteTabLoading(false);
+      });
+
+    return () => {
+      active = false;
+      window.clearTimeout(loadingTimer);
     };
   }, [activeTab, shouldLoadSocial, viewedUserId]);
 
@@ -337,7 +553,9 @@ export const Social = () => {
     if (activeTab !== 'Listas' || !shouldLoadSocial || !viewedUserId) return;
 
     let active = true;
-    setCollectionsLoading(true);
+    const loadingTimer = window.setTimeout(() => {
+      if (active) setCollectionsLoading(true);
+    }, 0);
 
     fetch(`${API_BASE_URL}/client/colecciones/usuario/${viewedUserId}`)
       .then((res) => res.json())
@@ -369,6 +587,7 @@ export const Social = () => {
 
     return () => {
       active = false;
+      window.clearTimeout(loadingTimer);
     };
   }, [activeTab, shouldLoadSocial, viewedUserId]);
 
@@ -376,7 +595,9 @@ export const Social = () => {
     if (activeTab !== 'Reseñas' || !shouldLoadSocial || !viewedUserId) return;
 
     let active = true;
-    setReviewsLoading(true);
+    const loadingTimer = window.setTimeout(() => {
+      if (active) setReviewsLoading(true);
+    }, 0);
 
     Promise.all([
       fetch(`${API_BASE_URL}/client/reviews/user/${viewedUserId}`).then((res) => res.json()),
@@ -421,6 +642,7 @@ export const Social = () => {
 
     return () => {
       active = false;
+      window.clearTimeout(loadingTimer);
     };
   }, [activeTab, shouldLoadSocial, viewedUserId]);
 
@@ -457,11 +679,7 @@ export const Social = () => {
 
     setUnfollowLoading(true);
 
-    fetch(`${API_BASE_URL}/client/seguidores/dejar-de-seguir`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id_usuario: userId, id_seguir: viewedUserId }),
-    })
+    unfollowUser(userId, viewedUserId)
       .then(() => {
         setIsFollowing(false);
         setSocialStatsData((currentStats) => ({
@@ -1022,7 +1240,67 @@ export const Social = () => {
                 </div>
               ) : (
                 <div className="rounded-xl border border-dashed border-slate-700 px-6 py-16 text-center text-white/60">
-                  No hay películas vistas aún.
+                  No hay peliculas vistas aun.
+                </div>
+              )}
+            </div>
+          )}
+
+          {activeTab === 'Actividad' && (
+            <div className="w-full">
+              <h2 className="mb-5 text-3xl font-extrabold text-slate-100">Actividad</h2>
+
+              {activityLoading ? (
+                <div className="space-y-3">
+                  {Array.from({ length: 5 }).map((_, index) => (
+                    <div
+                      key={`activity-skeleton-${index}`}
+                      className="h-20 animate-pulse rounded-md border border-slate-800 bg-slate-900"
+                    />
+                  ))}
+                </div>
+              ) : activityItems.length > 0 ? (
+                <div className="space-y-3">
+                  {activityItems.map((item) => {
+                    const Icon = item.icon;
+
+                    return (
+                      <article
+                        key={item.id}
+                        className="flex items-center gap-4 rounded-md border border-slate-800 bg-slate-900/45 px-4 py-3"
+                      >
+                        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-slate-700 text-sky-200">
+                          <Icon className="h-5 w-5" />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm font-black text-white">{item.title}</p>
+                          <p className="mt-1 line-clamp-1 text-xs font-semibold text-white/50">{item.detail}</p>
+                        </div>
+                        {item.movie?.imagenPoster && (
+                          <button
+                            type="button"
+                            onClick={() => navigate(`/social/pelicula/${item.movie.id}`, { state: { movie: item.movie } })}
+                            className="hidden h-14 w-10 shrink-0 overflow-hidden rounded border border-slate-800 sm:block"
+                            aria-label={item.movie.titulo}
+                          >
+                            <img
+                              src={item.movie.imagenPoster || FALLBACK_POSTER}
+                              alt=""
+                              className="h-full w-full object-cover"
+                              onError={handleImageFallback}
+                            />
+                          </button>
+                        )}
+                        <span className="hidden text-xs font-bold text-white/35 md:block">
+                          {formatActivityDate(item.date)}
+                        </span>
+                      </article>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="rounded-xl border border-dashed border-slate-700 px-6 py-16 text-center text-white/60">
+                  Aun no hay actividad para mostrar.
                 </div>
               )}
             </div>
@@ -1030,30 +1308,35 @@ export const Social = () => {
 
           {activeTab === 'Favoritos' && (
             <div className="w-full">
-              <h2 className="mb-5 text-3xl font-extrabold text-slate-100">Películas Favoritas</h2>
+              <div className="mb-5">
+                <h2 className="text-3xl font-extrabold text-slate-100">Peliculas favoritas</h2>
+                <p className="mt-2 text-sm font-semibold text-white/50">
+                  Lista completa de peliculas marcadas como favoritas. Las 5 del perfil se editan aparte en Modificar perfil.
+                </p>
+              </div>
 
               {favoriteTabLoading ? (
-                <div className="flex gap-4 overflow-x-auto pb-4">
-                  {Array.from({ length: 6 }).map((_, index) => (
+                <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-5 lg:grid-cols-7">
+                  {Array.from({ length: 10 }).map((_, index) => (
                     <div
-                      key={`fav-skeleton-${index}`}
-                      className="aspect-[2/3] w-36 shrink-0 animate-pulse rounded-md border border-slate-800 bg-slate-800"
+                      key={`favorite-list-skeleton-${index}`}
+                      className="aspect-[2/3] animate-pulse rounded-md border border-slate-800 bg-slate-800"
                     />
                   ))}
                 </div>
               ) : favoriteTabMovies.length > 0 ? (
-                <div className="flex gap-4 overflow-x-auto pb-4">
+                <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-5 lg:grid-cols-7">
                   {favoriteTabMovies.map((movie) => (
                     <article
-                      key={`fav-tab-${movie.id}`}
-                      className="group aspect-[2/3] w-36 shrink-0 cursor-pointer overflow-hidden rounded-md border border-slate-800 bg-slate-900 shadow-xl shadow-black/25 transition-transform hover:-translate-y-1 hover:shadow-2xl"
+                      key={`favorite-list-${movie.id}`}
+                      className="group cursor-pointer overflow-hidden rounded-md border border-slate-800 bg-slate-900 shadow-xl shadow-black/25 transition-transform hover:-translate-y-1 hover:shadow-2xl"
                       title={movie.titulo}
                       onClick={() => navigate(`/social/pelicula/${movie.id}`, { state: { movie } })}
                     >
                       <img
                         src={movie.imagenPoster || FALLBACK_POSTER}
                         alt={movie.titulo}
-                        className="h-full w-full object-cover"
+                        className="aspect-[2/3] w-full object-cover"
                         onError={handleImageFallback}
                       />
                     </article>
@@ -1061,7 +1344,7 @@ export const Social = () => {
                 </div>
               ) : (
                 <div className="rounded-xl border border-dashed border-slate-700 px-6 py-16 text-center text-white/60">
-                  No hay películas favoritas aún.
+                  No hay peliculas favoritas en la lista completa.
                 </div>
               )}
             </div>
