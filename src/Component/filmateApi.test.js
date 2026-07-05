@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  getHomeRecommendations,
   getMovies,
   getShowtimesByCinema,
   loginUser,
@@ -147,5 +148,55 @@ describe('filmateApi requests', () => {
     await expect(getShowtimesByCinema(1)).resolves.toMatchObject({
       funciones: [{ id_funcion: 1, precio_base: 22 }],
     });
+  });
+
+  it('fetches home recommendations with the JWT and normalizes the payload', async () => {
+    fetch.mockResolvedValueOnce(
+      jsonResponse({
+        user_id: 42,
+        total: 2,
+        recomendaciones: [
+          { id_pelicula: 101, titulo: 'Dune: Part Two', url_poster: 'https://cdn.filmate.app/dune2.jpg' },
+          { id_pelicula: 102, titulo: 'Interestelar', url_poster: 'https://cdn.filmate.app/interestelar.jpg' },
+        ],
+        signals: { peliculas_favoritas_count: 5 },
+      })
+    );
+
+    const result = await getHomeRecommendations({ token: 'jwt.demo.token', limit: 10 });
+
+    expect(fetch).toHaveBeenCalledWith(
+      '/api/recommendations/home?limit=10',
+      expect.objectContaining({
+        method: 'GET',
+        headers: expect.objectContaining({
+          Authorization: 'Bearer jwt.demo.token',
+          Accept: 'application/json',
+        }),
+      })
+    );
+    expect(result).toMatchObject({
+      userId: 42,
+      total: 2,
+      signals: { peliculas_favoritas_count: 5 },
+    });
+    expect(result.recomendaciones).toHaveLength(2);
+    expect(result.recomendaciones[0]).toMatchObject({ id_pelicula: 101, titulo: 'Dune: Part Two' });
+  });
+
+  it('clamps the requested limit to the supported range', async () => {
+    fetch.mockResolvedValueOnce(jsonResponse({ user_id: 1, total: 0, recomendaciones: [] }));
+
+    await getHomeRecommendations({ token: 'jwt.demo.token', limit: 999 });
+
+    expect(fetch).toHaveBeenCalledWith(
+      '/api/recommendations/home?limit=50',
+      expect.any(Object)
+    );
+  });
+
+  it('rejects calls without a token', async () => {
+    await expect(getHomeRecommendations({ limit: 5 })).rejects.toThrow('recommendations_unauthorized');
+    expect(fetch).not.toHaveBeenCalled();
   });
 });

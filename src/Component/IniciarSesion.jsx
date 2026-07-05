@@ -75,7 +75,7 @@ export const IniciarSesion = () => {
     try {
       setLoading(true);
       const response = await loginUser({ correo, contrasena: password });
-      saveRegisteredSession(response.user);
+      saveRegisteredSession(response.user, response.access_token);
       completeLogin(response.user?.nombre || response.user?.username || correo, false);
     } catch (err) {
       setError(getFriendlyLoginError(err));

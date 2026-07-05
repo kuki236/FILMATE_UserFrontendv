@@ -1,11 +1,13 @@
 ﻿import { useCallback, useEffect, useMemo, useState } from 'react';
 import PropTypes from 'prop-types';
-import { Filter, X } from 'lucide-react';
+import { Filter, Sparkles, X } from 'lucide-react';
 import Header from './Header.jsx';
 import Footer from './Footer.jsx';
 import StarRatingDisplay from './StarRatingDisplay.jsx';
 import { useNavigate } from 'react-router-dom';
 import { getCinemas, getMovies, getShowtimesByDate } from './filmateApi';
+import { isRegisteredSession } from './authSession';
+import { useHomeRecommendations } from './hooks/useHomeRecommendations.js';
 
 const FALLBACK_MEDIA_IMAGE =
     "data:image/svg+xml;charset=UTF-8," +
@@ -30,8 +32,60 @@ const handleImageFallback = (event) => {
 };
 
 const movieSkeletons = Array.from({ length: 6 }, (_, index) => index);
-const getMovieCardKey = (pelicula) => pelicula.id || pelicula.titulo;
+const getMovieCardKey = (pelicula) => pelicula.id || pelicula.titulo || pelicula.id_pelicula;
 const estrenoScore = (pelicula) => (pelicula.estreno ? 1 : 0);
+
+const formatDurationMinutes = (minutes) => {
+    if (!minutes && minutes !== 0) return null;
+    const hours = Math.floor(minutes / 60);
+    const rest = minutes % 60;
+    if (hours <= 0) return `${minutes} min`;
+    return `${hours}h ${rest.toString().padStart(2, '0')}min`;
+};
+
+const getRecommendationGenres = (pelicula) => {
+    if (Array.isArray(pelicula?.generos) && pelicula.generos.length > 0) {
+        return pelicula.generos
+            .map((genero) => {
+                if (typeof genero === 'string') return genero;
+                return genero?.nombre_genero || genero?.nombre || genero?.genero?.nombre || '';
+            })
+            .filter(Boolean);
+    }
+
+    if (typeof pelicula?.genero === 'string') {
+        return pelicula.genero.split(',').map((item) => item.trim()).filter(Boolean);
+    }
+
+    return [];
+};
+
+const buildRecommendedMovie = (pelicula) => {
+    if (!pelicula) return null;
+
+    const id = pelicula.id_pelicula || pelicula.id;
+    const duracion = formatDurationMinutes(pelicula.duracion_minutos);
+
+    return {
+        id,
+        id_pelicula: id,
+        titulo: pelicula.titulo || 'Sin título',
+        imagenPoster: pelicula.url_poster || pelicula.imagenPoster || '',
+        imagenBanner: pelicula.url_banner || pelicula.imagenBanner || '',
+        director: pelicula.director || 'Por definir',
+        anio: pelicula.anio_lanzamiento || pelicula.anio || null,
+        clasificacion: pelicula.clasificacion || null,
+        duracion,
+        duracion_minutos: pelicula.duracion_minutos ?? null,
+        estado_pelicula: pelicula.estado_pelicula || null,
+        rating: Number(pelicula.promedio_resenas ?? pelicula.rating ?? 0),
+        totalResenas: Number(pelicula.total_resenas ?? 0),
+        totalFavoritos: Number(pelicula.total_favoritos_comunidad ?? 0),
+        motivo: pelicula.motivo || null,
+        score: Number(pelicula.score ?? 0),
+        generos: getRecommendationGenres(pelicula),
+    };
+};
 
 const MovieCardSkeleton = ({ large = false }) => (
     <div className="overflow-hidden rounded-3xl border border-slate-700/50 bg-slate-800/30">
@@ -45,6 +99,104 @@ const MovieCardSkeleton = ({ large = false }) => (
 
 MovieCardSkeleton.propTypes = {
     large: PropTypes.bool,
+};
+
+const RecommendationCard = ({ pelicula, onSelect }) => {
+    const handleClick = () => {
+        if (typeof onSelect === 'function') onSelect(pelicula);
+    };
+
+    const subtitleParts = [pelicula.director, pelicula.anio].filter(Boolean);
+    const subtitle = subtitleParts.join(' · ');
+    const classificationOrDuration = [pelicula.clasificacion, pelicula.duracion].filter(Boolean).join(' · ');
+    const motivoText = pelicula.motivo && pelicula.motivo.length > 110
+        ? `${pelicula.motivo.slice(0, 107)}…`
+        : pelicula.motivo;
+
+    return (
+        <button
+            type="button"
+            onClick={handleClick}
+            aria-label={`Recomendación: ${pelicula.titulo}`}
+            title={pelicula.motivo || pelicula.titulo}
+            className="group relative flex h-[550px] flex-col overflow-hidden rounded-3xl border border-slate-700/50 bg-slate-800/30 text-left backdrop-blur-sm transition-all duration-300 hover:scale-[1.02] hover:border-red-500/50 hover:shadow-2xl hover:shadow-red-500/20"
+        >
+            <div className="relative h-[320px] overflow-hidden">
+                <img
+                    src={pelicula.imagenPoster}
+                    alt={pelicula.titulo}
+                    className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-110"
+                    onError={handleImageFallback}
+                    loading="lazy"
+                />
+                <div className="absolute inset-0 bg-gradient-to-t from-slate-900 via-slate-900/40 to-transparent" />
+                {pelicula.totalFavoritos > 0 && (
+                    <div className="absolute right-3 top-3 z-20 rounded-full border border-amber-300/40 bg-amber-400/20 px-3 py-1 text-[11px] font-bold uppercase tracking-wide text-amber-100 shadow-lg backdrop-blur-sm">
+                        Popular
+                    </div>
+                )}
+                {motivoText && (
+                    <div className="absolute inset-x-0 bottom-0 z-20 bg-gradient-to-t from-slate-950/95 via-slate-950/80 to-transparent px-4 pb-3 pt-6 text-[12px] font-medium text-slate-100 opacity-0 transition-opacity duration-300 group-hover:opacity-100">
+                        {motivoText}
+                    </div>
+                )}
+            </div>
+
+            <div className="flex flex-1 flex-col gap-3 p-5">
+                <div>
+                    <h3 className="line-clamp-2 text-lg font-bold text-white">{pelicula.titulo}</h3>
+                    {subtitle && (
+                        <p className="mt-1 text-sm text-slate-300">{subtitle}</p>
+                    )}
+                    {classificationOrDuration && (
+                        <p className="mt-1 text-xs text-slate-400">{classificationOrDuration}</p>
+                    )}
+                </div>
+
+                {pelicula.generos.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5">
+                        {pelicula.generos.slice(0, 3).map((genero, index) => (
+                            <span
+                                key={`${pelicula.id}-genero-${index}`}
+                                className="rounded-full border border-slate-600/70 bg-slate-700/50 px-2.5 py-0.5 text-[11px] font-semibold text-slate-200"
+                            >
+                                {genero}
+                            </span>
+                        ))}
+                    </div>
+                )}
+
+                <div className="mt-auto flex items-center justify-between">
+                    <span className="text-sm font-semibold text-amber-300">
+                        ★ {pelicula.rating ? pelicula.rating.toFixed(1) : '—'}
+                    </span>
+                    {motivoText && (
+                        <span className="inline-flex items-center gap-1 text-[11px] font-semibold uppercase tracking-wide text-red-300">
+                            <Sparkles className="h-3 w-3" />
+                            Para ti
+                        </span>
+                    )}
+                </div>
+            </div>
+        </button>
+    );
+};
+
+RecommendationCard.propTypes = {
+    pelicula: PropTypes.shape({
+        id: PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
+        titulo: PropTypes.string,
+        imagenPoster: PropTypes.string,
+        director: PropTypes.string,
+        anio: PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
+        clasificacion: PropTypes.string,
+        duracion: PropTypes.string,
+        motivo: PropTypes.string,
+        rating: PropTypes.number,
+        totalFavoritos: PropTypes.number,
+        generos: PropTypes.arrayOf(PropTypes.string),
+    }).isRequired,
+    onSelect: PropTypes.func,
 };
 
 export const MenuPrincipal = () => {
@@ -61,6 +213,10 @@ export const MenuPrincipal = () => {
     const [selectedDay, setSelectedDay] = useState('');
     const [selectedCinema, setSelectedCinema] = useState('all');
     const [selectedGenre, setSelectedGenre] = useState('all');
+    const [isMobileViewport, setIsMobileViewport] = useState(() => {
+        if (typeof globalThis.window === 'undefined') return false;
+        return globalThis.window.matchMedia('(max-width: 767px)').matches;
+    });
     const LIMA_TIME_ZONE = 'America/Lima';
     const dateKeyFormatter = useMemo(
         () =>
@@ -138,6 +294,22 @@ export const MenuPrincipal = () => {
 
         return label.charAt(0).toUpperCase() + label.slice(1);
     }, [getOffsetDateKey]);
+
+    useEffect(() => {
+        if (typeof globalThis.window === 'undefined') return undefined;
+
+        const mediaQuery = globalThis.window.matchMedia('(max-width: 767px)');
+        const handleChange = (event) => {
+            setIsMobileViewport(event.matches);
+        };
+
+        setIsMobileViewport(mediaQuery.matches);
+        mediaQuery.addEventListener('change', handleChange);
+
+        return () => {
+            mediaQuery.removeEventListener('change', handleChange);
+        };
+    }, []);
 
     useEffect(() => {
         let isMounted = true;
@@ -299,6 +471,50 @@ export const MenuPrincipal = () => {
         );
     };
 
+    const recommendationLimit = isMobileViewport ? 6 : 10;
+    const isPersonalizedEnabled = isRegisteredSession();
+    const {
+        data: recomendacionesPersonalizadas,
+        loading: recomendacionesLoading,
+        error: recomendacionesError,
+        signals: recomendacionesSignals,
+    } = useHomeRecommendations({ limit: recommendationLimit, autoFetch: isPersonalizedEnabled });
+
+    const recomendacionesNormalizadas = useMemo(
+        () => recomendacionesPersonalizadas.map(buildRecommendedMovie).filter(Boolean),
+        [recomendacionesPersonalizadas]
+    );
+
+    const recomendacionesVisibles = useMemo(() => {
+        if (!isPersonalizedEnabled) {
+            return displayPeliculas.slice(0, 3);
+        }
+        if (recomendacionesLoading && recomendacionesNormalizadas.length === 0) {
+            return [];
+        }
+        if (recomendacionesError) {
+            return displayPeliculas.slice(0, 3);
+        }
+        if (recomendacionesNormalizadas.length === 0) {
+            return displayPeliculas.slice(0, 3);
+        }
+        return recomendacionesNormalizadas;
+    }, [
+        displayPeliculas,
+        isPersonalizedEnabled,
+        recomendacionesError,
+        recomendacionesLoading,
+        recomendacionesNormalizadas,
+    ]);
+
+    const recomendacionesEnCarga = isPersonalizedEnabled
+        ? recomendacionesLoading && recomendacionesNormalizadas.length === 0
+        : isCatalogLoading;
+
+    const recomendacionesHeader = isPersonalizedEnabled && recomendacionesNormalizadas.length > 0
+        ? 'Recomendado para ti'
+        : 'Recomendaciones';
+
     const irADetalle = (pelicula) => {
         navigate(`/menuPrincipal/detallePelicula/${pelicula.id}`, {
             state: {
@@ -378,19 +594,55 @@ export const MenuPrincipal = () => {
                 )}
 
                 {/* Recomendaciones */}
-                <section className="mb-16">
-                    <h2 className="text-4xl font-bold text-white mb-8">Recomendaciones</h2>
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-                        {isCatalogLoading ? (
+                <section className="mb-16" aria-label={recomendacionesHeader}>
+                    <div className="mb-8 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+                        <div>
+                            <h2 className="flex items-center gap-3 text-4xl font-bold text-white">
+                                {isPersonalizedEnabled && (
+                                    <Sparkles className="h-7 w-7 text-red-400" aria-hidden="true" />
+                                )}
+                                {recomendacionesHeader}
+                            </h2>
+                            {isPersonalizedEnabled && recomendacionesSignals ? (
+                                <p className="mt-1 text-sm text-slate-400">
+                                    Basado en tus {recomendacionesSignals.peliculas_favoritas_count ?? 0} favoritas,
+                                    {' '}
+                                    {recomendacionesSignals.resenas_5_estrellas_count ?? 0} reseñas de 5 estrellas
+                                    {' '}
+                                    y los géneros que más consumes.
+                                </p>
+                            ) : (
+                                <p className="mt-1 text-sm text-slate-400">
+                                    Inicia sesión para obtener recomendaciones hechas a tu medida.
+                                </p>
+                            )}
+                        </div>
+                        {isPersonalizedEnabled && recomendacionesVisibles.length > 0 && (
+                            <span className="inline-flex items-center gap-2 self-start rounded-full border border-red-500/40 bg-red-500/10 px-3 py-1 text-xs font-bold uppercase tracking-wider text-red-200">
+                                <Sparkles className="h-3 w-3" />
+                                Personalizado
+                            </span>
+                        )}
+                    </div>
+                    <div className="grid grid-cols-1 gap-8 md:grid-cols-2 lg:grid-cols-3">
+                        {recomendacionesEnCarga ? (
                             movieSkeletons.slice(0, 3).map((item) => (
                                 <MovieCardSkeleton key={item} large />
                             ))
-                        ) : displayPeliculas.length === 0 ? (
+                        ) : recomendacionesVisibles.length === 0 ? (
                             <div className="col-span-full rounded-3xl border border-slate-700/50 bg-slate-800/30 p-6 text-slate-300">
                                 No hay peliculas con funciones disponibles en la fecha seleccionada.
                             </div>
+                        ) : isPersonalizedEnabled && recomendacionesNormalizadas.length > 0 ? (
+                            recomendacionesVisibles.map((pelicula) => (
+                                <RecommendationCard
+                                    key={`recommended-${getMovieCardKey(pelicula)}`}
+                                    pelicula={pelicula}
+                                    onSelect={irADetalle}
+                                />
+                            ))
                         ) : (
-                            displayPeliculas.slice(0, 3).map((pelicula) => (
+                            recomendacionesVisibles.map((pelicula) => (
                             <button
                                 type="button"
                                 key={`recommended-${getMovieCardKey(pelicula)}`}

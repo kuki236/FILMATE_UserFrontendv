@@ -1198,4 +1198,33 @@ export function createSeatWebSocket(showtimeId) {
   return new WebSocket(`${wsBaseUrl}/ws/seats/${showtimeId}`);
 }
 
+export async function getHomeRecommendations({ token, limit = 10, signal } = {}) {
+  if (!token || typeof token !== 'string') {
+    throw new Error('recommendations_unauthorized');
+  }
+
+  const safeLimit = Math.max(1, Math.min(50, Number(limit) || 10));
+  const data = await request(`/recommendations/home?limit=${safeLimit}`, {
+    method: 'GET',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: 'application/json',
+    },
+    signal,
+  });
+
+  const recomendaciones = asPayloadArray(
+    data,
+    ['recomendaciones', 'recommendations', 'movies', 'items']
+  );
+
+  return {
+    userId: data?.user_id ?? data?.userId ?? null,
+    total: Number(data?.total ?? recomendaciones.length),
+    recomendaciones,
+    signals: data?.signals ?? null,
+    raw: data,
+  };
+}
+
 export { API_BASE_URL };
