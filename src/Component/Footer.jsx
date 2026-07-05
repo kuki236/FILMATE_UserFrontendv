@@ -1,4 +1,4 @@
-import { Facebook, Instagram, Music2, Youtube, X, BookOpen, ChevronRight } from 'lucide-react';
+import { Music2, X, BookOpen, ChevronRight } from 'lucide-react';
 
 const footerGroups = [
   {
@@ -16,10 +16,10 @@ const footerGroups = [
 ];
 
 const socialItems = [
-  { label: 'Instagram', icon: Instagram, color: 'from-pink-500 via-red-500 to-yellow-400' },
+  { label: 'Instagram', text: 'IG', color: 'from-pink-500 via-red-500 to-yellow-400' },
   { label: 'X', icon: X, color: 'from-slate-900 to-slate-950' },
-  { label: 'Facebook', icon: Facebook, color: 'from-blue-500 to-blue-700' },
-  { label: 'YouTube', icon: Youtube, color: 'from-red-500 to-red-600' },
+  { label: 'Facebook', text: 'f', color: 'from-blue-500 to-blue-700' },
+  { label: 'YouTube', text: '▶', color: 'from-red-500 to-red-600' },
   { label: 'TikTok', icon: Music2, color: 'from-slate-900 to-slate-950' },
 ];
 
@@ -73,7 +73,11 @@ export const Footer = () => {
                     aria-label={social.label}
                     className={`flex h-14 w-14 items-center justify-center rounded-full border border-slate-700 bg-gradient-to-br ${social.color} text-white shadow-lg shadow-black/30 transition-transform hover:scale-105`}
                   >
-                    <Icon className="h-7 w-7" />
+                    {Icon ? (
+                      <Icon className="h-7 w-7" />
+                    ) : (
+                      <span className="text-xl font-black leading-none">{social.text}</span>
+                    )}
                   </button>
                 );
               })}

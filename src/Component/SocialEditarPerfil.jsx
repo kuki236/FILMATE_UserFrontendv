@@ -14,6 +14,7 @@ import {
 
 const FALLBACK_POSTER = 'https://placehold.co/400x600/0f172a/f8fafc?text=Filmate';
 const MAX_FAVORITES = 5;
+const favoriteSlotIds = ['favorite-slot-1', 'favorite-slot-2', 'favorite-slot-3', 'favorite-slot-4', 'favorite-slot-5'];
 const AVATAR_STYLES = ['bottts', 'adventurer', 'notionists', 'micah', 'personas'];
 const PROFILE_FAVORITES_PREFIX = 'filmate.social.profileFavorites.';
 
@@ -24,7 +25,7 @@ const readProfileFavoritesCache = (userId) => {
   if (!userId) return [];
 
   try {
-    const rawFavorites = window.localStorage.getItem(getProfileFavoritesCacheKey(userId));
+    const rawFavorites = globalThis.window.localStorage.getItem(getProfileFavoritesCacheKey(userId));
     return rawFavorites ? JSON.parse(rawFavorites) : [];
   } catch {
     return [];
@@ -35,7 +36,7 @@ const writeProfileFavoritesCache = (userId, movies) => {
   if (!userId) return;
 
   try {
-    window.localStorage.setItem(getProfileFavoritesCacheKey(userId), JSON.stringify(movies.slice(0, MAX_FAVORITES)));
+    globalThis.window.localStorage.setItem(getProfileFavoritesCacheKey(userId), JSON.stringify(movies.slice(0, MAX_FAVORITES)));
   } catch {
     // Cache opcional de las 5 destacadas.
   }
@@ -170,14 +171,14 @@ export const SocialEditarPerfil = () => {
       };
     }
 
-    const timer = window.setTimeout(() => {
+    const timer = globalThis.window.setTimeout(() => {
       if (!active) return;
       setMovieSearchLoading(false);
     }, 0);
 
     return () => {
       active = false;
-      window.clearTimeout(timer);
+      globalThis.window.clearTimeout(timer);
     };
   }, [modalOpen]);
 
@@ -500,12 +501,12 @@ export const SocialEditarPerfil = () => {
                 </div>
 
                 <div className="mt-5 grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-5">
-                  {Array.from({ length: MAX_FAVORITES }).map((_, index) => {
+                  {favoriteSlotIds.map((slotId, index) => {
                     const movie = selectedMovies[index];
 
                     return (
                       <div
-                        key={`favorite-slot-${index}`}
+                        key={slotId}
                         className="relative aspect-[2/3] overflow-hidden rounded-md border border-slate-800 bg-slate-950"
                       >
                         {movie ? (

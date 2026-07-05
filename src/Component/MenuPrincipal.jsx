@@ -1,4 +1,5 @@
 ﻿import { useCallback, useEffect, useMemo, useState } from 'react';
+import PropTypes from 'prop-types';
 import { Filter, X } from 'lucide-react';
 import Header from './Header.jsx';
 import Footer from './Footer.jsx';
@@ -29,6 +30,8 @@ const handleImageFallback = (event) => {
 };
 
 const movieSkeletons = Array.from({ length: 6 }, (_, index) => index);
+const getMovieCardKey = (pelicula) => pelicula.id || pelicula.titulo;
+const estrenoScore = (pelicula) => (pelicula.estreno ? 1 : 0);
 
 const MovieCardSkeleton = ({ large = false }) => (
     <div className="overflow-hidden rounded-3xl border border-slate-700/50 bg-slate-800/30">
@@ -39,6 +42,10 @@ const MovieCardSkeleton = ({ large = false }) => (
         </div>
     </div>
 );
+
+MovieCardSkeleton.propTypes = {
+    large: PropTypes.bool,
+};
 
 export const MenuPrincipal = () => {
     const navigate = useNavigate();
@@ -275,7 +282,7 @@ export const MenuPrincipal = () => {
     const days = useMemo(() => {
         return availableDays
             .slice()
-            .sort()
+            .sort((firstDay, secondDay) => firstDay.localeCompare(secondDay))
             .map((dateKey) => ({
                 value: dateKey,
                 label: formatDayLabel(dateKey),
@@ -341,7 +348,7 @@ export const MenuPrincipal = () => {
         () =>
             filteredPeliculas
                 .slice()
-                .sort((a, b) => (b.estreno ? 1 : 0) - (a.estreno ? 1 : 0)),
+                .sort((a, b) => estrenoScore(b) - estrenoScore(a)),
         [filteredPeliculas]
     );
     const currentShowtimeFilterKey = selectedDay ? `${selectedDay}|${selectedCinema}` : '';
@@ -383,11 +390,12 @@ export const MenuPrincipal = () => {
                                 No hay peliculas con funciones disponibles en la fecha seleccionada.
                             </div>
                         ) : (
-                            displayPeliculas.slice(0, 3).map((pelicula, i) => (
-                            <div
-                                key={i}
+                            displayPeliculas.slice(0, 3).map((pelicula) => (
+                            <button
+                                type="button"
+                                key={`recommended-${getMovieCardKey(pelicula)}`}
                                 onClick={() => irADetalle(pelicula)}
-                                className="bg-slate-800/30 backdrop-blur-sm rounded-3xl overflow-hidden border border-slate-700/50 hover:border-red-500/50 transition-all duration-300 hover:scale-105 hover:shadow-2xl hover:shadow-red-500/20 cursor-pointer group relative"
+                                className="bg-slate-800/30 backdrop-blur-sm rounded-3xl overflow-hidden border border-slate-700/50 hover:border-red-500/50 transition-all duration-300 hover:scale-105 hover:shadow-2xl hover:shadow-red-500/20 cursor-pointer group relative text-left"
                             >
                                 <div className="relative overflow-hidden">
                                     {pelicula.estreno && (
@@ -415,7 +423,7 @@ export const MenuPrincipal = () => {
                                     </p>
                                     {renderStars(pelicula.rating)}
                                 </div>
-                            </div>
+                            </button>
                             ))
                         )}
                     </div>
@@ -447,8 +455,9 @@ export const MenuPrincipal = () => {
 
                     <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
                         <div>
-                            <label className="mb-2 block text-sm font-semibold text-slate-300">Día</label>
+                            <label htmlFor="cartelera-dia" className="mb-2 block text-sm font-semibold text-slate-300">Día</label>
                             <select
+                                id="cartelera-dia"
                                 value={selectedDay}
                                 onChange={(e) => setSelectedDay(e.target.value)}
                                 className="w-full rounded-2xl border border-slate-600 bg-slate-800 px-4 py-3 text-white outline-none transition-colors focus:border-red-500"
@@ -466,8 +475,9 @@ export const MenuPrincipal = () => {
                         </div>
 
                         <div>
-                            <label className="mb-2 block text-sm font-semibold text-slate-300">Cine</label>
+                            <label htmlFor="cartelera-cine" className="mb-2 block text-sm font-semibold text-slate-300">Cine</label>
                             <select
+                                id="cartelera-cine"
                                 value={selectedCinema}
                                 onChange={(e) => setSelectedCinema(e.target.value)}
                                 className="w-full rounded-2xl border border-slate-600 bg-slate-800 px-4 py-3 text-white outline-none transition-colors focus:border-red-500"
@@ -483,8 +493,9 @@ export const MenuPrincipal = () => {
                         </div>
 
                         <div>
-                            <label className="mb-2 block text-sm font-semibold text-slate-300">Género</label>
+                            <label htmlFor="cartelera-genero" className="mb-2 block text-sm font-semibold text-slate-300">Género</label>
                             <select
+                                id="cartelera-genero"
                                 value={selectedGenre}
                                 onChange={(e) => setSelectedGenre(normalizeText(e.target.value))}
                                 className="w-full rounded-2xl border border-slate-600 bg-slate-800 px-4 py-3 text-white outline-none transition-colors focus:border-red-500"
@@ -515,11 +526,12 @@ export const MenuPrincipal = () => {
                         </div>
                     ) : (
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                            {displayPeliculas.map((pelicula, i) => (
-                                <div
-                                    key={i}
+                            {displayPeliculas.map((pelicula) => (
+                                <button
+                                    type="button"
+                                    key={`movie-${getMovieCardKey(pelicula)}`}
                                     onClick={() => irADetalle(pelicula)}
-                                    className="bg-slate-800/30 backdrop-blur-sm rounded-3xl overflow-hidden border border-slate-700/50 hover:border-red-500/50 transition-all duration-300 hover:scale-105 hover:shadow-xl hover:shadow-red-500/20 cursor-pointer group relative"
+                                    className="bg-slate-800/30 backdrop-blur-sm rounded-3xl overflow-hidden border border-slate-700/50 hover:border-red-500/50 transition-all duration-300 hover:scale-105 hover:shadow-xl hover:shadow-red-500/20 cursor-pointer group relative text-left"
                                 >
                                     <div className="relative overflow-hidden">
                                         {pelicula.estreno && (
@@ -547,7 +559,7 @@ export const MenuPrincipal = () => {
                                         </p>
                                         {renderStars(pelicula.rating)}
                                     </div>
-                                </div>
+                                </button>
                                 ))}
                         </div>
                     )}

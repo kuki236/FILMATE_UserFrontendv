@@ -96,8 +96,8 @@ export const IniciarSesion = () => {
       }
     };
 
-    window.addEventListener('keydown', handleKeyPress);
-    return () => window.removeEventListener('keydown', handleKeyPress);
+    globalThis.window.addEventListener('keydown', handleKeyPress);
+    return () => globalThis.window.removeEventListener('keydown', handleKeyPress);
   }, [handleLogin]);
 
   return (
