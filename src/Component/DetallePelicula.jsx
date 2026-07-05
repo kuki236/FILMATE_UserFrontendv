@@ -1,10 +1,11 @@
 import { useState, useEffect, useRef } from 'react';
+import PropTypes from 'prop-types';
 import { AlertTriangle, ArrowLeft, ArrowRight, Clock3, Clapperboard, Play, X } from 'lucide-react';
 import Header from './Header.jsx';
 import Footer from './Footer.jsx';
 import StarRatingDisplay from './StarRatingDisplay.jsx';
-import { useLocation, useNavigate, useParams } from 'react-router-dom';
-import { createSeatWebSocket, getCinemas, getMovieById, getMovieReviews, getRoomById, getRooms, getSeatMap, getShowtimesByDate, getSystemConfig, normalizeSeat } from './filmateApi';
+import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
+import { createSeatWebSocket, getCinemas, getMovieById, getMovieReviews, getRoomById, getRooms, getSeatMap, getShowtimesByDate, normalizeSeat } from './filmateApi';
 
 const FALLBACK_MEDIA_IMAGE =
     "data:image/svg+xml;charset=UTF-8," +
@@ -31,10 +32,27 @@ const handleImageFallback = (event) => {
     event.currentTarget.src = FALLBACK_MEDIA_IMAGE;
 };
 
+const handleDialogBackdropKeyDown = (event, onClose) => {
+    if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        onClose();
+    }
+};
+
+const reviewShape = PropTypes.shape({
+    userId: PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
+    usuario: PropTypes.string,
+    avatar: PropTypes.string,
+    fechaPublicacion: PropTypes.string,
+    rating: PropTypes.number,
+    texto: PropTypes.string,
+});
+
 const getShowtimeDateTime = (showtime) =>
     showtime?.fecha_hora_inicio || showtime?.fecha_hora || showtime?.horario || '';
 
 const LIMA_TIME_ZONE = 'America/Lima';
+const reviewSkeletonIds = ['review-skeleton-a', 'review-skeleton-b', 'review-skeleton-c'];
 
 const detailDateFormatter = new Intl.DateTimeFormat('en-CA', {
     timeZone: LIMA_TIME_ZONE,
@@ -66,7 +84,7 @@ const getOffsetDateKey = (offsetDays) => {
 
 const getShowtimeDateKey = (showtime) => {
     const value = getShowtimeDateTime(showtime);
-    const rawDate = String(value || '').match(/^(\d{4}-\d{2}-\d{2})/)?.[1];
+    const rawDate = /^(\d{4}-\d{2}-\d{2})/.exec(String(value || ''))?.[1];
     if (rawDate) return rawDate;
 
     return value ? formatDateKey(new Date(value)) : '';
@@ -77,7 +95,7 @@ const formatShowtimeDateTime = (showtime, forcedDateKey = '') => {
     if (!value) return 'Horario por definir';
 
     const dateKey = forcedDateKey || getShowtimeDateKey(showtime);
-    const timeMatch = String(value).match(/(\d{1,2}):(\d{2})/);
+    const timeMatch = /(\d{1,2}):(\d{2})/.exec(String(value));
     const timeText = timeMatch
         ? `${timeMatch[1].padStart(2, '0')}:${timeMatch[2]}`
         : new Date(value).toLocaleTimeString('es-PE', {
@@ -121,6 +139,14 @@ const keepAvailableSelectedSeats = (selectedSeats, nextSeats) =>
         )
     );
 
+const splitCsvValue = (value) =>
+    value
+        ? String(value).split(',').map((item) => item.trim()).filter(Boolean)
+        : [];
+
+const getListValue = (listValue, fallbackValue) =>
+    Array.isArray(listValue) && listValue.length ? listValue : splitCsvValue(fallbackValue);
+
 const reviewRelativeTimeFormatter = new Intl.RelativeTimeFormat('es', {
     numeric: 'always',
 });
@@ -157,6 +183,7 @@ const ReviewCard = ({ review, modal = false }) => {
         ? 'rounded-2xl border border-slate-600/50 bg-slate-700/30 p-6 backdrop-blur-sm'
         : 'rounded-3xl border border-slate-700/50 bg-slate-800/30 p-5 backdrop-blur-sm';
     const initial = String(review.usuario || 'U').replace(/^@/, '').charAt(0).toUpperCase();
+    const profilePath = review.userId ? `/social/${review.userId}` : '/social';
 
     return (
         <article className={cardClass}>
@@ -176,7 +203,12 @@ const ReviewCard = ({ review, modal = false }) => {
                 </div>
                 <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
-                        <p className={`${usernameSizeClass} truncate font-bold text-white`}>{review.usuario}</p>
+                        <Link
+                            to={profilePath}
+                            className={`${usernameSizeClass} truncate font-bold text-white transition-colors hover:text-sky-300`}
+                        >
+                            {review.usuario}
+                        </Link>
                         <time
                             dateTime={review.fechaPublicacion || undefined}
                             className="text-xs font-medium text-slate-400"
@@ -197,6 +229,11 @@ const ReviewCard = ({ review, modal = false }) => {
             </p>
         </article>
     );
+};
+
+ReviewCard.propTypes = {
+    review: reviewShape.isRequired,
+    modal: PropTypes.bool,
 };
 
 const getCinemaByRoomId = (roomId) => {
@@ -239,8 +276,36 @@ const getShowFormat = (showtime) => {
     if (roomType) return roomType;
 
     const roomName = String(showtime?.nombre_sala || showtime?.sala || '');
-    const inferred = roomName.match(/\b(IMAX|4DX|VIP|3D|2D|EST[ÁA]NDAR)\b/i)?.[1];
+    const inferred = /\b(IMAX|4DX|VIP|3D|2D|EST[ÁA]NDAR)\b/i.exec(roomName)?.[1];
     return normalizeRoomType(inferred) || 'Sala estándar';
+};
+
+const getSeatColors = ({ selected, unavailable }) => {
+    if (selected) {
+        return { sit: '#1D9E75', sitS: '#0F6E56', back: '#0F6E56', backS: '#085041', arms: '#085041', num: '#ffffff' };
+    }
+
+    if (unavailable) {
+        return { sit: '#ef4444', sitS: '#b91c1c', back: '#dc2626', backS: '#991b1b', arms: '#dc2626', num: '#ffffff' };
+    }
+
+    return { sit: '#e8e7e2', sitS: '#c8c7c0', back: '#d0cfca', backS: '#b8b7b0', arms: '#c4c3bd', num: '#444441' };
+};
+
+const getCinemaEntry = ({ funcion, room, cinemaFromCatalog, cinemaName }) => {
+    if (!cinemaName) return getCinemaByRoomId(funcion.id_sala);
+
+    return {
+        id: funcion.id_cine ?? room?.id_cine ?? cinemaFromCatalog?.id ?? cinemaName,
+        nombre: cinemaName,
+    };
+};
+
+const getSeatGap = ({ maxSeatsInRow, seatGridWidth }) => {
+    if (maxSeatsInRow > 20) return 1;
+    if (maxSeatsInRow > 14) return 2;
+    if (seatGridWidth < 520) return 3;
+    return 6;
 };
 
 const SeatGlyph = ({
@@ -250,12 +315,7 @@ const SeatGlyph = ({
     unavailable = false,
     showNumber = true,
 }) => {
-    const c = selected
-        ? { sit: '#1D9E75', sitS: '#0F6E56', back: '#0F6E56', backS: '#085041', arms: '#085041', num: '#ffffff' }
-        : unavailable
-            ? { sit: '#ef4444', sitS: '#b91c1c', back: '#dc2626', backS: '#991b1b', arms: '#dc2626', num: '#ffffff' }
-            : { sit: '#e8e7e2', sitS: '#c8c7c0', back: '#d0cfca', backS: '#b8b7b0', arms: '#c4c3bd', num: '#444441' };
-
+    const c = getSeatColors({ selected, unavailable });
     const h = Math.round(seatSize * 1.11);
 
     return (
@@ -282,6 +342,14 @@ const SeatGlyph = ({
     );
 };
 
+SeatGlyph.propTypes = {
+    seatSize: PropTypes.number,
+    seatNumber: PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
+    selected: PropTypes.bool,
+    unavailable: PropTypes.bool,
+    showNumber: PropTypes.bool,
+};
+
 export const DetallePelicula = () => {
     const { movieId } = useParams();
     const [showAllReviews, setShowAllReviews] = useState(false);
@@ -302,7 +370,6 @@ export const DetallePelicula = () => {
     const [reviews, setReviews] = useState([]);
     const [reviewsLoading, setReviewsLoading] = useState(Boolean(movieId));
     const [reviewsError, setReviewsError] = useState('');
-    const [systemConfig, setSystemConfig] = useState({ limiteAsientosPorTransaccion: 10 });
     const location = useLocation();
     const navigate = useNavigate();
     const seatGridRef = useRef(null);
@@ -323,23 +390,7 @@ export const DetallePelicula = () => {
         selectedShowtimeDateKey;
 
     useEffect(() => {
-        window.scrollTo(0, 0);
-    }, []);
-
-    useEffect(() => {
-        let isMounted = true;
-
-        getSystemConfig()
-            .then((config) => {
-                if (isMounted) setSystemConfig(config);
-            })
-            .catch(() => {
-                if (isMounted) setSystemConfig({ limiteAsientosPorTransaccion: 10 });
-            });
-
-        return () => {
-            isMounted = false;
-        };
+        globalThis.window.scrollTo(0, 0);
     }, []);
 
     useEffect(() => {
@@ -466,9 +517,7 @@ export const DetallePelicula = () => {
                         funcion.cine?.nombre_cine ||
                         funcion.cine?.nombre ||
                         null;
-                    const cinema = cinemaName
-                        ? { id: funcion.id_cine ?? room?.id_cine ?? cinemaFromCatalog?.id ?? cinemaName, nombre: cinemaName }
-                        : getCinemaByRoomId(funcion.id_sala);
+                    const cinema = getCinemaEntry({ funcion, room, cinemaFromCatalog, cinemaName });
                     const cinemaKey = String(cinema.id);
 
                     if (!acc[cinemaKey]) {
@@ -513,7 +562,7 @@ export const DetallePelicula = () => {
     useEffect(() => {
         if (!returnSeatSelection) return;
 
-        const timer = window.setTimeout(() => {
+        const timer = globalThis.window.setTimeout(() => {
             if (returnSeatSelection.selectedShow) {
                 setSelectedShow(returnSeatSelection.selectedShow);
             }
@@ -523,7 +572,7 @@ export const DetallePelicula = () => {
             }
         }, 0);
 
-        return () => window.clearTimeout(timer);
+        return () => globalThis.window.clearTimeout(timer);
     }, [returnSeatSelection]);
 
     useEffect(() => {
@@ -659,24 +708,12 @@ export const DetallePelicula = () => {
     const poster = pelicula.imagenPoster || pelicula.imagen || FALLBACK_MEDIA_IMAGE;
     const trailerImg = pelicula.imagenTrailer || pelicula.imagenPoster || pelicula.imagen || FALLBACK_MEDIA_IMAGE;
     const titulo = pelicula.titulo || 'Película';
-    const generos = Array.isArray(pelicula.generos) && pelicula.generos.length
-        ? pelicula.generos
-        : pelicula.genero
-            ? String(pelicula.genero).split(',').map((item) => item.trim()).filter(Boolean)
-            : [];
+    const generos = getListValue(pelicula.generos, pelicula.genero);
     const rating = pelicula.rating || 0;
     const sinopsis = pelicula.sinopsis || 'Sinopsis próxima a actualizar.';
-    const directores = Array.isArray(pelicula.directores) && pelicula.directores.length
-        ? pelicula.directores
-        : pelicula.director
-            ? String(pelicula.director).split(',').map((item) => item.trim()).filter(Boolean)
-            : [];
+    const directores = getListValue(pelicula.directores, pelicula.director);
     const director = directores.length ? directores.join(', ') : 'Por definir';
-    const actores = Array.isArray(pelicula.actores) && pelicula.actores.length
-        ? pelicula.actores
-        : pelicula.reparto
-            ? String(pelicula.reparto).split(',').map((item) => item.trim()).filter(Boolean)
-            : [];
+    const actores = getListValue(pelicula.actores, pelicula.reparto);
     const textoTrailer = pelicula.trailer || 'TRÁILER OFICIAL';
     const trailerUrl = pelicula.trailerUrl || '';
 
@@ -687,7 +724,7 @@ export const DetallePelicula = () => {
     const getYouTubeVideoId = (url) => {
         if (!url) return null;
         const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|&v=)([^#&?]*).*/;
-        const match = url.match(regExp);
+        const match = regExp.exec(url);
         return (match && match[2].length === 11) ? match[2] : null;
     };
 
@@ -704,7 +741,7 @@ export const DetallePelicula = () => {
             ''
         ).trim();
 
-        const timeMatch = rawValue.match(/(\d{1,2}):(\d{2})/);
+        const timeMatch = /(\d{1,2}):(\d{2})/.exec(rawValue);
         if (timeMatch) {
             return (Number(timeMatch[1]) * 60) + Number(timeMatch[2]);
         }
@@ -773,16 +810,10 @@ export const DetallePelicula = () => {
 
     const toggleSeat = (seat) => {
         if (!seat || seat.estado !== 'Disponible') return;
-        const seatLimit = Number(systemConfig.limiteAsientosPorTransaccion || 10);
 
         setSelectedSeats((prev) => {
             if (prev.some((item) => item.id_asiento === seat.id_asiento)) {
                 return prev.filter((item) => item.id_asiento !== seat.id_asiento);
-            }
-
-            if (prev.length >= seatLimit) {
-                setSeatMapError(`Puedes seleccionar como máximo ${seatLimit} asientos por compra.`);
-                return prev;
             }
 
             setSeatMapError('');
@@ -839,7 +870,7 @@ export const DetallePelicula = () => {
     }, {});
     const backendSeatRows = Object.entries(seatMapByRow).sort(([a], [b]) => a.localeCompare(b, 'es', { numeric: true }));
     const maxSeatsInRow = Math.max(1, ...backendSeatRows.map(([, seats]) => seats.length));
-    const seatGap = maxSeatsInRow > 20 ? 1 : maxSeatsInRow > 14 ? 2 : seatGridWidth < 520 ? 3 : 6;
+    const seatGap = getSeatGap({ maxSeatsInRow, seatGridWidth });
     const seatLabelWidth = seatGridWidth < 520 ? 22 : 30;
     const availableSeatWidth = Math.max(0, seatGridWidth - seatLabelWidth - (seatGap * (maxSeatsInRow - 1)) - 12);
     const responsiveSeatSize = Math.max(7, Math.min(50, Math.floor(availableSeatWidth / maxSeatsInRow) || 28));
@@ -1134,7 +1165,7 @@ export const DetallePelicula = () => {
                             className="h-[280px] w-full sm:h-[400px]"
                             src={`https://www.youtube.com/embed/${videoId}?autoplay=1&playsinline=1&rel=0`}
                             title={`Tráiler de ${titulo}`}
-                            frameBorder="0"
+                            style={{ border: 0 }}
                             allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
                             allowFullScreen
                         />
@@ -1230,8 +1261,8 @@ export const DetallePelicula = () => {
                         <div className="space-y-4 hidden lg:block">
                             <h3 className="text-xl font-bold text-white">Reseñas de la comunidad</h3>
                             {reviewsLoading ? (
-                                Array.from({ length: 2 }).map((_, index) => (
-                                    <div key={index} className="h-36 animate-pulse rounded-3xl border border-slate-700/50 bg-slate-800/30" />
+                                reviewSkeletonIds.slice(0, 2).map((skeletonId) => (
+                                    <div key={`desktop-${skeletonId}`} className="h-36 animate-pulse rounded-3xl border border-slate-700/50 bg-slate-800/30" />
                                 ))
                             ) : reviewsError ? (
                                 <div className="rounded-3xl border border-amber-500/40 bg-amber-500/10 p-5 text-sm text-amber-100">
@@ -1364,8 +1395,8 @@ export const DetallePelicula = () => {
                         <div className="order-3 space-y-4 lg:hidden">
                             <h3 className="text-xl font-bold text-white">Reseñas de la comunidad</h3>
                             {reviewsLoading ? (
-                                Array.from({ length: 2 }).map((_, index) => (
-                                    <div key={index} className="h-36 animate-pulse rounded-3xl border border-slate-700/50 bg-slate-800/30" />
+                                reviewSkeletonIds.slice(0, 2).map((skeletonId) => (
+                                    <div key={`mobile-${skeletonId}`} className="h-36 animate-pulse rounded-3xl border border-slate-700/50 bg-slate-800/30" />
                                 ))
                             ) : reviewsError ? (
                                 <div className="rounded-3xl border border-amber-500/40 bg-amber-500/10 p-5 text-sm text-amber-100">
@@ -1395,12 +1426,17 @@ export const DetallePelicula = () => {
 
                 {showSeatHelp && (
                     <div
-                        className="fixed inset-0 z-[70] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4"
-                        onClick={() => setShowSeatHelp(false)}
+                        className="fixed inset-0 z-[70] flex items-center justify-center p-4"
                     >
+                        <button
+                            type="button"
+                            className="absolute inset-0 bg-black/80 backdrop-blur-sm"
+                            aria-label="Cerrar ayuda de asientos"
+                            onClick={() => setShowSeatHelp(false)}
+                            onKeyDown={(event) => handleDialogBackdropKeyDown(event, () => setShowSeatHelp(false))}
+                        />
                         <div
-                            className="w-full max-w-2xl rounded-3xl border border-slate-700 bg-slate-900 shadow-2xl"
-                            onClick={(e) => e.stopPropagation()}
+                            className="relative z-10 w-full max-w-2xl rounded-3xl border border-slate-700 bg-slate-900 shadow-2xl"
                         >
                             <div className="flex items-center justify-between border-b border-slate-700 px-5 py-4 sm:px-6">
                                 <div>
@@ -1461,12 +1497,18 @@ export const DetallePelicula = () => {
 
                 {/* Modal Reseñas */}
                 {showAllReviews && (
-                    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4"
-                         onClick={() => setShowAllReviews(false)}
+                    <div
+                         className="fixed inset-0 z-50 flex items-center justify-center p-4"
                     >
+                        <button
+                            type="button"
+                            className="absolute inset-0 bg-black/70 backdrop-blur-sm"
+                            aria-label="Cerrar reseñas"
+                            onClick={() => setShowAllReviews(false)}
+                            onKeyDown={(event) => handleDialogBackdropKeyDown(event, () => setShowAllReviews(false))}
+                        />
                         <div
-                            className="bg-slate-800 rounded-3xl shadow-2xl border border-slate-700 max-w-3xl w-full max-h-[80vh] overflow-hidden flex flex-col animate-scaleIn"
-                            onClick={(e) => e.stopPropagation()}
+                            className="relative z-10 bg-slate-800 rounded-3xl shadow-2xl border border-slate-700 max-w-3xl w-full max-h-[80vh] overflow-hidden flex flex-col animate-scaleIn"
                         >
                             <div className="p-6 border-b border-slate-700 flex items-center justify-between">
                                 <h2 className="text-2xl font-bold text-white">Todas las Reseñas</h2>

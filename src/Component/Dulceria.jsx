@@ -1,8 +1,9 @@
-import React, { useEffect, useRef, useState } from 'react';
+﻿import React, { useEffect, useRef, useState } from 'react';
+import PropTypes from 'prop-types';
 import { useLocation, useNavigate } from 'react-router-dom';
 import Header from './Header.jsx';
 import Footer from './Footer.jsx';
-import { AlertTriangle, ArrowLeft, CheckCircle2, CreditCard, Minus, Plus, ShoppingCart, Smartphone, X } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, CheckCircle2, CreditCard, LockKeyhole, Minus, Plus, ShieldCheck, ShoppingCart, Smartphone, X } from 'lucide-react';
 import { QRCodeCanvas } from 'qrcode.react';
 import jsPDF from 'jspdf';
 import { checkoutOrder, getSnackProducts, getSystemConfig } from './filmateApi';
@@ -44,6 +45,31 @@ const paymentOptions = [
   },
 ];
 
+const cartItemShape = PropTypes.shape({
+  id: PropTypes.oneOfType([PropTypes.string, PropTypes.number]).isRequired,
+  nombre: PropTypes.string.isRequired,
+  cantidad: PropTypes.number.isRequired,
+  precio: PropTypes.number.isRequired,
+});
+
+const bookingContextShape = PropTypes.shape({
+  pelicula: PropTypes.string,
+  sede: PropTypes.string,
+  horario: PropTypes.string,
+  sala: PropTypes.string,
+  asientos: PropTypes.arrayOf(PropTypes.oneOfType([PropTypes.string, PropTypes.number])),
+  subtotal: PropTypes.number,
+  returnToSeatSelection: PropTypes.object,
+});
+
+const buildCompactQrValue = ({ token, transactionId, pedidoNumber, total }) => {
+  const compactValue = `FILMATE|TXN:${transactionId || 'PEND'}|PED:${pedidoNumber}|TOTAL:${Number(total || 0).toFixed(2)}`;
+  if (!token) return compactValue;
+
+  const normalizedToken = String(token);
+  return normalizedToken.length <= 96 ? normalizedToken : compactValue;
+};
+
 const getCategoryScrollState = (container) => {
   const maxScrollLeft = Math.max(0, container.scrollWidth - container.clientWidth);
 
@@ -51,6 +77,23 @@ const getCategoryScrollState = (container) => {
     atStart: container.scrollLeft <= 64,
     atEnd: container.scrollLeft >= maxScrollLeft - 64,
   };
+};
+
+const getClearedBookingContext = (bookingContext) => {
+  const bookingBase = bookingContext
+    ? { ...bookingContext }
+    : { selectedSeats: [], asientosSeleccionados: [] };
+
+  bookingBase.returnToSeatSelection = bookingContext?.returnToSeatSelection
+    ? {
+        ...bookingContext.returnToSeatSelection,
+        selectedSeats: [],
+      }
+    : undefined;
+  bookingBase.selectedSeats = [];
+  bookingBase.asientosSeleccionados = [];
+
+  return bookingBase;
 };
 
 function TicketContent({ carrito, total, pedidoNumber, fechaCompra, bookingContext, transactionId, qrValue }) {
@@ -133,7 +176,7 @@ function TicketContent({ carrito, total, pedidoNumber, fechaCompra, bookingConte
               value={qrValue || `FILMATE-${pedidoNumber}-${total.toFixed(2)}`}
               size={170}
               level="H"
-              includeMargin
+              marginSize={4}
               fgColor="#0f172a"
               bgColor="#ffffff"
               className="block"
@@ -148,6 +191,16 @@ function TicketContent({ carrito, total, pedidoNumber, fechaCompra, bookingConte
     </div>
   );
 }
+
+TicketContent.propTypes = {
+  carrito: PropTypes.arrayOf(cartItemShape).isRequired,
+  total: PropTypes.number.isRequired,
+  pedidoNumber: PropTypes.oneOfType([PropTypes.string, PropTypes.number]).isRequired,
+  fechaCompra: PropTypes.instanceOf(Date).isRequired,
+  bookingContext: bookingContextShape,
+  transactionId: PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
+  qrValue: PropTypes.string,
+};
 
 const checkoutViews = {
   cart: 'cart',
@@ -250,6 +303,77 @@ function VerificationModal({
   );
 }
 
+VerificationModal.propTypes = {
+  carrito: PropTypes.arrayOf(cartItemShape).isRequired,
+  snacksTotal: PropTypes.number.isRequired,
+  reservationTotal: PropTypes.number.isRequired,
+  total: PropTypes.number.isRequired,
+  isSeatFlow: PropTypes.bool.isRequired,
+  onUpdateQuantity: PropTypes.func.isRequired,
+  onRequestExit: PropTypes.func.isRequired,
+  onPay: PropTypes.func.isRequired,
+};
+
+const onlyDigits = (value) => String(value || '').replace(/\D/g, '');
+
+const formatCardNumber = (value) =>
+  onlyDigits(value)
+    .slice(0, 19)
+    .replace(/(.{4})/g, '$1 ')
+    .trim();
+
+const formatExpiry = (value) => {
+  const digits = onlyDigits(value).slice(0, 4);
+  if (digits.length <= 2) return digits;
+  return `${digits.slice(0, 2)}/${digits.slice(2)}`;
+};
+
+const getCardBrand = (cardNumber) => {
+  const digits = onlyDigits(cardNumber);
+  if (/^4/.test(digits)) return 'Visa';
+  if (/^(5[1-5]|2[2-7])/.test(digits)) return 'Mastercard';
+  if (/^3[47]/.test(digits)) return 'American Express';
+  return 'Tarjeta';
+};
+
+const isValidExpiry = (expiry) => {
+  const [monthText, yearText] = String(expiry || '').split('/');
+  const month = Number(monthText);
+  const year = Number(`20${yearText || ''}`);
+  if (!month || month < 1 || month > 12 || !yearText || yearText.length !== 2) return false;
+
+  const now = new Date();
+  const expiryDate = new Date(year, month, 0, 23, 59, 59);
+  return expiryDate >= now;
+};
+
+const getPaymentValidation = ({ method, cardForm, walletForm }) => {
+  if (method === 'tarjeta') {
+    const cardDigits = onlyDigits(cardForm.number);
+    const cvvDigits = onlyDigits(cardForm.cvv);
+    const documentDigits = onlyDigits(cardForm.document);
+
+    if (cardDigits.length < 13) return { valid: false, message: 'Ingresa un numero de tarjeta valido.' };
+    if (!cardForm.holder.trim()) return { valid: false, message: 'Ingresa el nombre del titular.' };
+    if (!isValidExpiry(cardForm.expiry)) return { valid: false, message: 'Ingresa una fecha de vencimiento valida.' };
+    if (cvvDigits.length < 3) return { valid: false, message: 'Ingresa el CVV.' };
+    if (documentDigits.length < 8) return { valid: false, message: 'Ingresa el documento del titular.' };
+    return { valid: true, message: '' };
+  }
+
+  if (onlyDigits(walletForm.phone).length < 9) {
+    return { valid: false, message: 'Ingresa el celular asociado a tu billetera.' };
+  }
+  if (onlyDigits(walletForm.document).length < 8) {
+    return { valid: false, message: 'Ingresa tu documento.' };
+  }
+  if (onlyDigits(walletForm.approvalCode).length !== 6) {
+    return { valid: false, message: 'Ingresa el codigo de aprobacion de 6 digitos.' };
+  }
+
+  return { valid: true, message: '' };
+};
+
 function PaymentModal({
   paymentTotal,
   paymentSubtotal,
@@ -268,6 +392,45 @@ function PaymentModal({
   onRequestExit,
   onConfirmPayment,
 }) {
+  const [cardForm, setCardForm] = useState({
+    number: '',
+    holder: '',
+    expiry: '',
+    cvv: '',
+    document: '',
+    installments: '1',
+  });
+  const [walletForm, setWalletForm] = useState({
+    phone: '',
+    document: '',
+    approvalCode: '',
+  });
+  const cardBrand = getCardBrand(cardForm.number);
+  const validation = getPaymentValidation({
+    method: selectedPaymentMethod,
+    cardForm,
+    walletForm,
+  });
+  const cardLastFour = onlyDigits(cardForm.number).slice(-4);
+  const phoneLastThree = onlyDigits(walletForm.phone).slice(-3);
+  const paymentMethodLabel = selectedPaymentMethod === 'tarjeta'
+    ? `${cardBrand}${cardLastFour ? ` **** ${cardLastFour}` : ''}`
+    : `${selectedPayment?.label || selectedPaymentMethod}${phoneLastThree ? ` ***${phoneLastThree}` : ''}`;
+  const confirmPaymentLabel = isProcessingPayment
+    ? 'Procesando pago...'
+    : `Pagar S/. ${paymentTotal.toFixed(2)}`;
+
+  const handleConfirm = () => {
+    if (!validation.valid || isProcessingPayment) return;
+
+    onConfirmPayment({
+      metodo_pago: paymentMethodLabel,
+      provider: 'Filmate Pago',
+      installments: selectedPaymentMethod === 'tarjeta' ? Number(cardForm.installments) : 1,
+      brand: selectedPaymentMethod === 'tarjeta' ? cardBrand : selectedPayment?.label,
+    });
+  };
+
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/70 p-3 sm:items-center sm:p-4">
       <div className="flex max-h-[92vh] w-full max-w-[95vw] flex-col overflow-y-auto rounded-2xl border border-slate-700 bg-slate-900 font-sans shadow-2xl sm:max-w-lg">
@@ -367,23 +530,135 @@ function PaymentModal({
             })}
           </div>
 
-          <div className="mb-6 rounded-xl bg-slate-800 p-4">
-            <div className="mb-3 flex items-center justify-between text-sm text-slate-300">
-              <span>Método seleccionado</span>
-              <span className="text-blue-300">{selectedPayment?.label}</span>
+          <div className="mb-6 rounded-2xl border border-slate-700 bg-slate-950/70 p-4">
+            <div className="mb-4 flex items-center justify-between gap-3">
+              <div>
+                <p className="text-sm font-black text-white">Pago seguro Filmate</p>
+                <p className="mt-1 text-xs font-semibold text-slate-400">Validacion inspirada en checkout digital.</p>
+              </div>
+              <div className="flex items-center gap-1 rounded-full border border-emerald-400/30 bg-emerald-400/10 px-3 py-1 text-xs font-bold text-emerald-200">
+                <ShieldCheck className="h-3.5 w-3.5" />
+                SSL
+              </div>
             </div>
-            <div className="mb-3 flex items-center justify-between text-sm text-slate-300">
-              <span>Estado</span>
-              <span className={isProcessingPayment ? 'text-yellow-300' : 'text-emerald-300'}>
-                {isProcessingPayment ? 'Procesando...' : 'Listo para pagar'}
-              </span>
-            </div>
-            <div className="h-2 overflow-hidden rounded-full bg-slate-700">
-              <div
-                className={`h-full rounded-full bg-gradient-to-r from-blue-500 to-emerald-400 transition-all duration-500 ${
-                  isProcessingPayment ? 'w-[85%] animate-pulse' : 'w-[30%]'
-                }`}
-              />
+
+            {selectedPaymentMethod === 'tarjeta' ? (
+              <div className="space-y-3">
+                <label className="block">
+                  <span className="text-xs font-bold text-slate-400">Numero de tarjeta</span>
+                  <div className="mt-1 flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 focus-within:border-sky-400">
+                    <CreditCard className="h-4 w-4 shrink-0 text-sky-300" />
+                    <input
+                      value={cardForm.number}
+                      onChange={(event) => setCardForm((current) => ({ ...current, number: formatCardNumber(event.target.value) }))}
+                      inputMode="numeric"
+                      autoComplete="cc-number"
+                      placeholder="1234 1234 1234 1234"
+                      className="min-w-0 flex-1 bg-transparent text-sm font-semibold text-white outline-none placeholder:text-white/30"
+                    />
+                    <span className="text-xs font-black text-sky-300">{cardBrand}</span>
+                  </div>
+                </label>
+
+                <label className="block">
+                  <span className="text-xs font-bold text-slate-400">Titular</span>
+                  <input
+                    value={cardForm.holder}
+                    onChange={(event) => setCardForm((current) => ({ ...current, holder: event.target.value.toUpperCase() }))}
+                    autoComplete="cc-name"
+                    placeholder="NOMBRE Y APELLIDO"
+                    className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm font-semibold text-white outline-none placeholder:text-white/30 focus:border-sky-400"
+                  />
+                </label>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <label className="block">
+                    <span className="text-xs font-bold text-slate-400">Vence</span>
+                    <input
+                      value={cardForm.expiry}
+                      onChange={(event) => setCardForm((current) => ({ ...current, expiry: formatExpiry(event.target.value) }))}
+                      inputMode="numeric"
+                      autoComplete="cc-exp"
+                      placeholder="MM/AA"
+                      className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm font-semibold text-white outline-none placeholder:text-white/30 focus:border-sky-400"
+                    />
+                  </label>
+                  <label className="block">
+                    <span className="text-xs font-bold text-slate-400">CVV</span>
+                    <input
+                      value={cardForm.cvv}
+                      onChange={(event) => setCardForm((current) => ({ ...current, cvv: onlyDigits(event.target.value).slice(0, 4) }))}
+                      inputMode="numeric"
+                      autoComplete="cc-csc"
+                      placeholder="123"
+                      className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm font-semibold text-white outline-none placeholder:text-white/30 focus:border-sky-400"
+                    />
+                  </label>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <label className="block">
+                    <span className="text-xs font-bold text-slate-400">Documento</span>
+                    <input
+                      value={cardForm.document}
+                      onChange={(event) => setCardForm((current) => ({ ...current, document: onlyDigits(event.target.value).slice(0, 12) }))}
+                      inputMode="numeric"
+                      placeholder="DNI"
+                      className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm font-semibold text-white outline-none placeholder:text-white/30 focus:border-sky-400"
+                    />
+                  </label>
+                  <label className="block">
+                    <span className="text-xs font-bold text-slate-400">Cuotas</span>
+                    <select
+                      value={cardForm.installments}
+                      onChange={(event) => setCardForm((current) => ({ ...current, installments: event.target.value }))}
+                      className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm font-semibold text-white outline-none focus:border-sky-400"
+                    >
+                      <option value="1">1 cuota sin intereses</option>
+                      <option value="3">3 cuotas</option>
+                      <option value="6">6 cuotas</option>
+                    </select>
+                  </label>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <label className="block">
+                  <span className="text-xs font-bold text-slate-400">Celular asociado a {selectedPayment?.label}</span>
+                  <input
+                    value={walletForm.phone}
+                    onChange={(event) => setWalletForm((current) => ({ ...current, phone: onlyDigits(event.target.value).slice(0, 9) }))}
+                    inputMode="numeric"
+                    placeholder="999999999"
+                    className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm font-semibold text-white outline-none placeholder:text-white/30 focus:border-sky-400"
+                  />
+                </label>
+                <label className="block">
+                  <span className="text-xs font-bold text-slate-400">Documento</span>
+                  <input
+                    value={walletForm.document}
+                    onChange={(event) => setWalletForm((current) => ({ ...current, document: onlyDigits(event.target.value).slice(0, 12) }))}
+                    inputMode="numeric"
+                    placeholder="DNI"
+                    className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm font-semibold text-white outline-none placeholder:text-white/30 focus:border-sky-400"
+                  />
+                </label>
+                <label className="block">
+                  <span className="text-xs font-bold text-slate-400">Codigo de aprobacion</span>
+                  <input
+                    value={walletForm.approvalCode}
+                    onChange={(event) => setWalletForm((current) => ({ ...current, approvalCode: onlyDigits(event.target.value).slice(0, 6) }))}
+                    inputMode="numeric"
+                    placeholder="6 digitos"
+                    className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm font-semibold text-white outline-none placeholder:text-white/30 focus:border-sky-400"
+                  />
+                </label>
+              </div>
+            )}
+
+            <div className="mt-4 flex items-center gap-2 rounded-lg bg-slate-900 px-3 py-2 text-xs font-semibold text-slate-300">
+              <LockKeyhole className="h-4 w-4 text-emerald-300" />
+              <span>{validation.valid ? 'Datos listos para procesar.' : validation.message}</span>
             </div>
           </div>
 
@@ -395,11 +670,11 @@ function PaymentModal({
               Cancelar
             </button>
             <button
-              onClick={onConfirmPayment}
-              disabled={isProcessingPayment}
+              onClick={handleConfirm}
+              disabled={isProcessingPayment || !validation.valid}
               className="flex-1 rounded-lg bg-emerald-600 py-2 font-semibold text-white transition-colors hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-emerald-800"
             >
-              {isProcessingPayment ? 'Pagando...' : `Pagar con ${selectedPayment?.label || 'método'}`}
+              {confirmPaymentLabel}
             </button>
           </div>
         </div>
@@ -408,8 +683,30 @@ function PaymentModal({
   );
 }
 
+PaymentModal.propTypes = {
+  paymentTotal: PropTypes.number.isRequired,
+  paymentSubtotal: PropTypes.number.isRequired,
+  serviceFee: PropTypes.number.isRequired,
+  taxAmount: PropTypes.number.isRequired,
+  isSeatFlow: PropTypes.bool.isRequired,
+  seatsCount: PropTypes.number.isRequired,
+  reservationTotal: PropTypes.number.isRequired,
+  skipSnacksForReservation: PropTypes.bool.isRequired,
+  checkoutError: PropTypes.string,
+  bookingContext: bookingContextShape,
+  selectedPaymentMethod: PropTypes.string.isRequired,
+  selectedPayment: PropTypes.shape({
+    label: PropTypes.string,
+  }),
+  isProcessingPayment: PropTypes.bool.isRequired,
+  onSelectPaymentMethod: PropTypes.func.isRequired,
+  onRequestExit: PropTypes.func.isRequired,
+  onConfirmPayment: PropTypes.func.isRequired,
+};
+
 function ExitConfirmDialog({ pendingExitAction, onClose, onConfirm }) {
   const isPaymentExit = pendingExitAction === 'verification';
+  const title = isPaymentExit ? '¿Cancelar el pago?' : '¿Seguro que quieres salir?';
 
   return (
     <div className="fixed inset-0 z-[60] flex items-end justify-center bg-black/80 p-3 sm:items-center sm:p-4">
@@ -420,7 +717,7 @@ function ExitConfirmDialog({ pendingExitAction, onClose, onConfirm }) {
           </div>
           <div>
             <h2 className="text-lg font-bold text-white sm:text-xl">
-              {isPaymentExit ? '¿Cancelar el pago?' : '¿Seguro que quieres salir?'}
+              {title}
             </h2>
             <p className="text-sm text-slate-400">
               {isPaymentExit
@@ -457,6 +754,12 @@ function ExitConfirmDialog({ pendingExitAction, onClose, onConfirm }) {
   );
 }
 
+ExitConfirmDialog.propTypes = {
+  pendingExitAction: PropTypes.string,
+  onClose: PropTypes.func.isRequired,
+  onConfirm: PropTypes.func.isRequired,
+};
+
 function NoticeDialog({ notice, onClose }) {
   return (
     <div className="fixed inset-0 z-[70] flex items-end justify-center bg-black/80 p-3 sm:items-center sm:p-4">
@@ -484,6 +787,14 @@ function NoticeDialog({ notice, onClose }) {
     </div>
   );
 }
+
+NoticeDialog.propTypes = {
+  notice: PropTypes.shape({
+    title: PropTypes.string.isRequired,
+    message: PropTypes.string.isRequired,
+  }).isRequired,
+  onClose: PropTypes.func.isRequired,
+};
 
 function SuccessModal({
   ticketRef,
@@ -542,6 +853,23 @@ function SuccessModal({
     </div>
   );
 }
+
+SuccessModal.propTypes = {
+  ticketRef: PropTypes.shape({
+    current: PropTypes.object,
+  }).isRequired,
+  receiptCart: PropTypes.arrayOf(cartItemShape).isRequired,
+  receiptTotal: PropTypes.number.isRequired,
+  pedidoNumber: PropTypes.oneOfType([PropTypes.string, PropTypes.number]).isRequired,
+  fechaCompra: PropTypes.instanceOf(Date).isRequired,
+  bookingContext: bookingContextShape,
+  transactionId: PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
+  qrValue: PropTypes.string,
+  isSeatFlow: PropTypes.bool.isRequired,
+  isGeneratingPDF: PropTypes.bool.isRequired,
+  onClose: PropTypes.func.isRequired,
+  onDownload: PropTypes.func.isRequired,
+};
 
 export const Dulceria = () => {
   const [carrito, setCarrito] = useState(() => {
@@ -611,26 +939,38 @@ export const Dulceria = () => {
   const receiptCart = isSeatFlow && skipSnacksForReservation ? [] : carrito;
   const receiptTotal = Number(checkoutResult?.monto_total ?? checkoutResult?.transaccion?.monto_total ?? paymentTotal);
   const primaryQrToken = checkoutResult?.boletos?.find((ticket) => ticket?.codigo_qr_token)?.codigo_qr_token;
-  const qrValue =
-    primaryQrToken ||
-    `FILMATE|TXN:${transactionId || 'PEND'}|PED:${pedidoNumber}|TOTAL:${receiptTotal.toFixed(2)}`;
+  const qrValue = buildCompactQrValue({
+    token: primaryQrToken,
+    transactionId,
+    pedidoNumber,
+    total: receiptTotal,
+  });
 
-  const buildPurchaseHistoryItem = (response = null) => {
+  const buildPurchaseHistoryItem = (response = null, paymentData = {}) => {
     const nextTransactionId = response?.id_transaccion || response?.transaccion?.id_transaccion || transactionId;
     const nextReceiptTotal = Number(response?.monto_total ?? response?.transaccion?.monto_total ?? paymentTotal);
     const nextPrimaryQrToken = response?.boletos?.find((ticket) => ticket?.codigo_qr_token)?.codigo_qr_token;
+    const nextPaymentMethod =
+      response?.metodo_pago ||
+      response?.transaccion?.metodo_pago ||
+      paymentData.metodo_pago ||
+      selectedPayment?.label ||
+      selectedPaymentMethod;
 
     return {
       id: nextTransactionId || pedidoNumber,
       transactionId: nextTransactionId || null,
       pedidoNumber,
       createdAt: new Date().toISOString(),
-      method: selectedPayment?.label || selectedPaymentMethod,
+      method: nextPaymentMethod,
       total: nextReceiptTotal,
       type: isSeatFlow ? 'Reserva y dulcería' : 'Solo dulcería',
-      qrValue:
-        nextPrimaryQrToken ||
-        `FILMATE|TXN:${nextTransactionId || 'PEND'}|PED:${pedidoNumber}|TOTAL:${nextReceiptTotal.toFixed(2)}`,
+      qrValue: buildCompactQrValue({
+        token: nextPrimaryQrToken,
+        transactionId: nextTransactionId,
+        pedidoNumber,
+        total: nextReceiptTotal,
+      }),
       booking: bookingContext
         ? {
             pelicula: bookingContext.pelicula,
@@ -652,8 +992,8 @@ export const Dulceria = () => {
     };
   };
 
-  const recordPurchase = (response = null) => {
-    addPurchaseToHistory(getSessionUserId(authSession), buildPurchaseHistoryItem(response));
+  const recordPurchase = (response = null, paymentData = {}) => {
+    addPurchaseToHistory(getSessionUserId(authSession), buildPurchaseHistoryItem(response, paymentData));
   };
 
   useEffect(() => {
@@ -734,7 +1074,7 @@ export const Dulceria = () => {
 
   const agregarProducto = (producto) => {
     setLastAddedId(producto.id);
-    window.setTimeout(() => setLastAddedId((current) => (current === producto.id ? null : current)), 700);
+    globalThis.window.setTimeout(() => setLastAddedId((current) => (current === producto.id ? null : current)), 700);
 
     setCarrito((prev) => {
       const existe = prev.find((item) => item.id === producto.id);
@@ -815,7 +1155,7 @@ export const Dulceria = () => {
     const amount = Math.min(container.clientWidth * 0.8, 320);
     if (direction === 'left' && container.scrollLeft <= amount) {
       container.scrollTo({ left: 0, behavior: 'smooth' });
-      window.setTimeout(() => updateScrollState(key), 180);
+      globalThis.window.setTimeout(() => updateScrollState(key), 180);
       return;
     }
 
@@ -824,7 +1164,7 @@ export const Dulceria = () => {
       behavior: 'smooth',
     });
 
-    window.setTimeout(() => updateScrollState(key), 180);
+    globalThis.window.setTimeout(() => updateScrollState(key), 180);
   };
 
   const updateScrollState = (key) => {
@@ -850,12 +1190,12 @@ export const Dulceria = () => {
       });
     };
 
-    const timer = window.setTimeout(syncScrollState, 0);
-    window.addEventListener('resize', syncScrollState);
+    const timer = globalThis.window.setTimeout(syncScrollState, 0);
+    globalThis.window.addEventListener('resize', syncScrollState);
 
     return () => {
-      window.clearTimeout(timer);
-      window.removeEventListener('resize', syncScrollState);
+      globalThis.window.clearTimeout(timer);
+      globalThis.window.removeEventListener('resize', syncScrollState);
     };
   }, [productosPorCategoria]);
 
@@ -992,7 +1332,7 @@ export const Dulceria = () => {
       anchor.click();
       anchor.remove();
 
-      window.setTimeout(() => {
+      globalThis.window.setTimeout(() => {
         URL.revokeObjectURL(url);
         limpiarYSalir();
         setIsGeneratingPDF(false);
@@ -1016,7 +1356,7 @@ export const Dulceria = () => {
     setCheckoutView(checkoutViews.payment);
   };
 
-  const confirmarPago = async () => {
+  const confirmarPago = async (paymentData = {}) => {
     if (isProcessingPayment) return;
 
     const userId = authSession?.user?.id_usuario || authSession?.user?.id || authSession?.user?.user_id;
@@ -1042,7 +1382,7 @@ export const Dulceria = () => {
           id_usuario: userId,
           id_funcion: bookingContext.id_funcion,
           ids_asientos: seatIds,
-          metodo_pago: selectedPaymentMethod,
+          metodo_pago: paymentData.metodo_pago || selectedPaymentMethod,
           monto_boletos: reservationTotal,
           monto_confiteria: paymentSnackTotal,
           monto_subtotal: paymentSubtotal,
@@ -1055,22 +1395,14 @@ export const Dulceria = () => {
         });
 
         setCheckoutResult(response);
-        recordPurchase(response);
-        window.history.replaceState(
-          {
-            ...(window.history.state || {}),
-            usr: {
-              ...(bookingContext || {}),
-              returnToSeatSelection: bookingContext?.returnToSeatSelection
-                ? {
-                    ...bookingContext.returnToSeatSelection,
-                    selectedSeats: [],
-                  }
-                : undefined,
-              selectedSeats: [],
-              asientosSeleccionados: [],
-            },
-          },
+        recordPurchase(response, paymentData);
+        const currentHistoryState = globalThis.window.history.state;
+        const nextHistoryState = currentHistoryState
+          ? { ...currentHistoryState, usr: getClearedBookingContext(bookingContext) }
+          : { usr: getClearedBookingContext(bookingContext) };
+
+        globalThis.window.history.replaceState(
+          nextHistoryState,
           ''
         );
         setCheckoutView(checkoutViews.success);
@@ -1098,7 +1430,7 @@ export const Dulceria = () => {
 
       const response = await checkoutOrder({
         id_usuario: userId,
-        metodo_pago: selectedPaymentMethod,
+        metodo_pago: paymentData.metodo_pago || selectedPaymentMethod,
         monto_boletos: 0,
         monto_confiteria: paymentSnackTotal,
         monto_subtotal: paymentSubtotal,
@@ -1111,7 +1443,7 @@ export const Dulceria = () => {
       });
 
       setCheckoutResult(response);
-      recordPurchase(response);
+      recordPurchase(response, paymentData);
       setCheckoutView(checkoutViews.success);
     } catch (err) {
       setCheckoutError(err?.message || 'No se pudo completar la compra.');

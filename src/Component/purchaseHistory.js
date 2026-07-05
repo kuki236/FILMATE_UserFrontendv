@@ -8,7 +8,7 @@ export const getSessionUserId = (session) =>
 
 export const readPurchaseHistory = (userId) => {
   try {
-    const rawHistory = window.localStorage.getItem(getUserKey(userId));
+    const rawHistory = globalThis.window.localStorage.getItem(getUserKey(userId));
     return rawHistory ? JSON.parse(rawHistory) : [];
   } catch {
     return [];
@@ -17,8 +17,8 @@ export const readPurchaseHistory = (userId) => {
 
 export const savePurchaseHistory = (userId, purchases) => {
   try {
-    window.localStorage.setItem(getUserKey(userId), JSON.stringify(purchases.slice(0, 50)));
-    window.dispatchEvent(new CustomEvent(PURCHASE_HISTORY_UPDATED));
+    globalThis.window.localStorage.setItem(getUserKey(userId), JSON.stringify(purchases.slice(0, 50)));
+    globalThis.window.dispatchEvent(new CustomEvent(PURCHASE_HISTORY_UPDATED));
   } catch {
     // El historial local es auxiliar; la compra no debe fallar por almacenamiento.
   }

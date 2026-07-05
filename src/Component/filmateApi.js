@@ -1,4 +1,5 @@
 const DEFAULT_API_URL = '/api';
+const DEFAULT_REQUEST_TIMEOUT_MS = 15000;
 
 const API_BASE_URL = (import.meta.env.VITE_API_URL || DEFAULT_API_URL).replace(/\/$/, '');
 
@@ -6,15 +7,18 @@ const getWsBaseUrl = () => {
   const configured = import.meta.env.VITE_WS_URL;
   if (configured) return configured.replace(/\/$/, '');
 
-  if (typeof window === 'undefined') return '';
+  if (globalThis.window === undefined) return '';
 
-  if (API_BASE_URL === '/api' && ['localhost', '127.0.0.1'].includes(window.location.hostname)) {
+  const { location } = globalThis.window;
+
+  if (API_BASE_URL === '/api' && ['localhost', '127.0.0.1'].includes(location.hostname)) {
     return 'ws://127.0.0.1:8000';
   }
 
+  const apiPathSeparator = API_BASE_URL.startsWith('/') ? '' : '/';
   const apiUrl = API_BASE_URL.startsWith('http')
     ? API_BASE_URL
-    : `${window.location.origin}${API_BASE_URL.startsWith('/') ? '' : '/'}${API_BASE_URL}`;
+    : `${location.origin}${apiPathSeparator}${API_BASE_URL}`;
   const url = new URL(apiUrl);
   url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
   return url.toString().replace(/\/$/, '');
@@ -53,14 +57,31 @@ const toReadableMessage = (value) => {
   return '';
 };
 
-async function request(path, options = {}) {
-  const response = await fetch(`${API_BASE_URL}${path}`, {
-    headers: {
-      'Content-Type': 'application/json',
-      ...(options.headers || {}),
-    },
-    ...options,
-  });
+async function request(path, options) {
+  const { timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS, ...requestOptions } = options ?? {};
+  const baseHeaders = { 'Content-Type': 'application/json' };
+  const headers = requestOptions.headers
+    ? { ...baseHeaders, ...requestOptions.headers }
+    : baseHeaders;
+  const controller = new AbortController();
+  const timeoutId = globalThis.setTimeout(() => controller.abort(), timeoutMs);
+  let response;
+
+  try {
+    response = await fetch(`${API_BASE_URL}${path}`, {
+      ...requestOptions,
+      headers,
+      signal: requestOptions.signal || controller.signal,
+    });
+  } catch (error) {
+    if (error?.name === 'AbortError') {
+      throw new Error('La solicitud tardó demasiado. Verifica que el backend esté ejecutándose.', { cause: error });
+    }
+
+    throw error;
+  } finally {
+    globalThis.clearTimeout(timeoutId);
+  }
 
   if (!response.ok) {
     const raw = await response.text().catch(() => '');
@@ -405,8 +426,6 @@ export function normalizeSocialSummary(summary) {
         stats.total_movies ??
           stats.total_peliculas ??
           stats.peliculas ??
-          stats.total_reviews ??
-          stats.reviews ??
           0
       ),
       totalReviews: Number(stats.total_reviews ?? stats.reviews ?? 0),
@@ -419,7 +438,8 @@ export function normalizeSocialSummary(summary) {
         summary?.profile_favorites ||
         summary?.profileFavorites ||
         summary?.peliculas_destacadas ||
-        summary?.favoritas_destacadas,
+        summary?.favoritas_destacadas ||
+        summary?.favoritos,
       ['results', 'movies', 'peliculas', 'items']
     ).slice(0, 5).map(normalizeMovie),
   };
@@ -654,10 +674,20 @@ export async function createMovieReview(payload) {
   });
 }
 
+export async function updateMovieReview(reviewId, payload) {
+  return request(`/client/reviews/${reviewId}`, {
+    method: 'PUT',
+    body: JSON.stringify({
+      puntuacion_estrellas: payload.puntuacion_estrellas,
+      comentario: payload.comentario,
+    }),
+  });
+}
+
 export async function getMovieReviews(movieId, userId = null) {
   if (!movieId) return [];
 
-  const query = userId ? `?id_usuario=${encodeURIComponent(userId)}` : '';
+  const query = userId ? `?viewer_id=${encodeURIComponent(userId)}` : '';
   const data = await requestFirstAvailable([
     `/client/reviews/movie/${movieId}${query}`,
     `/client/resenas/movie/${movieId}${query}`,
@@ -720,12 +750,34 @@ export async function likeMovieReview(reviewId, userId) {
   if (!reviewId || !userId) return null;
 
   return requestFirstAvailable([
+    `/client/reviews/${reviewId}/toggle-like`,
     `/client/reviews/${reviewId}/like`,
+    `/client/reviews/${reviewId}/likes`,
     `/client/resenas/${reviewId}/like`,
+    `/client/resenas/${reviewId}/likes`,
+    '/client/reviews/like',
+    '/client/resenas/like',
   ], {
     method: 'POST',
     body: JSON.stringify({
       id_usuario: userId,
+    }),
+  });
+}
+
+export async function rateMovie(payload) {
+  return requestFirstAvailable([
+    '/client/ratings/',
+    '/client/calificaciones/',
+    `/client/movies/${payload.id_pelicula}/rating`,
+  ], {
+    method: 'POST',
+    body: JSON.stringify({
+      id_usuario: payload.id_usuario,
+      id_pelicula: payload.id_pelicula,
+      puntuacion_estrellas: payload.puntuacion_estrellas,
+      calificacion: payload.puntuacion_estrellas,
+      rating: payload.puntuacion_estrellas,
     }),
   });
 }
@@ -786,7 +838,8 @@ export async function getShowtimesByDate(targetDate, { cinemaId, movieId } = {})
   }
 
   const queryString = query.toString();
-  const data = await request(`/client/showtimes/date/${targetDate}${queryString ? `?${queryString}` : ''}`);
+  const querySuffix = queryString ? `?${queryString}` : '';
+  const data = await request(`/client/showtimes/date/${targetDate}${querySuffix}`);
   const funciones = Array.isArray(data) ? data : extractShowtimeList(data);
   return funciones.map(normalizeShowtime);
 }
@@ -1017,6 +1070,20 @@ export async function getUserReviews(userId) {
   );
 }
 
+export async function getFollowingReviews(userId) {
+  if (!userId) return [];
+
+  const data = await requestFirstAvailable([
+    `/client/reviews/following/${userId}`,
+    `/client/resenas/following/${userId}`,
+    `/client/social/following/${userId}/reviews`,
+  ]);
+
+  return asPayloadArray(data, ['results', 'reviews', 'resenas', 'items']).map((review) =>
+    normalizeMovieReview(review)
+  );
+}
+
 export async function getUserInteractions(userId) {
   if (!userId) return [];
   const data = await request(`/client/interacciones/usuario/${userId}`);
@@ -1032,6 +1099,11 @@ export async function updateMovieInteraction(payload) {
       vista: Boolean(payload.vista),
       favorita: Boolean(payload.favorita),
       en_lista_seguimiento: Boolean(payload.en_lista_seguimiento),
+      fecha_vista: payload.fecha_vista,
+      fecha_favorito: payload.fecha_favorito,
+      fecha_favorita: payload.fecha_favorita,
+      puntuacion_estrellas: payload.puntuacion_estrellas,
+      calificacion: payload.calificacion,
     }),
   });
 }

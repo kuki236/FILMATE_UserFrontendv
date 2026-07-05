@@ -90,7 +90,7 @@ export const Cines = () => {
                 className="bg-slate-900 rounded-lg overflow-hidden border border-slate-700 hover:border-blue-500 transition-colors duration-300"
               >
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 p-6">
-                  <div className="cursor-pointer" onClick={() => handleMapClick(cine)}>
+                  <div>
                     <div className="bg-slate-800 rounded-lg overflow-hidden h-96 hover:opacity-80 transition-opacity">
                       <iframe
                         title={`Mapa de ${cine.nombre}`}
