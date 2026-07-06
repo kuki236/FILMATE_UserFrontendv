@@ -1025,10 +1025,8 @@ export async function searchUsers(query) {
   const normalizedQuery = query?.trim();
   if (!normalizedQuery) return [];
 
-  const data = await requestFirstAvailable([
-    '/admin/users/?estado=ACTIVO',
-    '/admin/users/',
-  ]);
+  const params = new URLSearchParams({ q: normalizedQuery });
+  const data = await request(`/client/users/search?${params.toString()}`);
 
   const queryText = normalizedQuery.toLowerCase();
 
@@ -1111,13 +1109,7 @@ export async function updateMovieInteraction(payload) {
 export async function getUserPurchases(userId) {
   if (!userId || userId === 'guest') return [];
 
-  const data = await requestFirstAvailable([
-    `/client/orders/user/${userId}`,
-    `/client/orders/history/${userId}`,
-    `/client/compras/usuario/${userId}`,
-    `/client/transacciones/usuario/${userId}`,
-    `/client/users/${userId}/purchases`,
-  ]);
+  const data = await request(`/client/users/${userId}/purchases`);
 
   return asPayloadArray(data, ['results', 'orders', 'compras', 'transacciones', 'items'])
     .map(normalizePurchase)
