@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import PropTypes from 'prop-types';
 import { ChevronDown, LogOut, Menu, ReceiptText, ShoppingBag, Ticket, X } from 'lucide-react';
 import { QRCodeCanvas } from 'qrcode.react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
@@ -19,6 +20,36 @@ const formatDate = (value) => {
     minute: '2-digit',
   });
 };
+
+const purchaseBookingShape = PropTypes.shape({
+  pelicula: PropTypes.string,
+  sede: PropTypes.string,
+  horario: PropTypes.string,
+  sala: PropTypes.string,
+  asientos: PropTypes.arrayOf(PropTypes.oneOfType([PropTypes.string, PropTypes.number])),
+  subtotal: PropTypes.number,
+});
+
+const purchaseSnackShape = PropTypes.shape({
+  id: PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
+  nombre: PropTypes.string,
+  cantidad: PropTypes.number,
+  precio: PropTypes.number,
+  subtotal: PropTypes.number,
+});
+
+const purchaseShape = PropTypes.shape({
+  id: PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
+  type: PropTypes.string,
+  createdAt: PropTypes.oneOfType([PropTypes.string, PropTypes.instanceOf(Date)]),
+  total: PropTypes.number,
+  booking: purchaseBookingShape,
+  snacks: PropTypes.arrayOf(purchaseSnackShape),
+  pedidoNumber: PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
+  transactionId: PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
+  method: PropTypes.string,
+  qrValue: PropTypes.string,
+});
 
 function PurchaseDetail({ purchase }) {
   return (
@@ -105,7 +136,7 @@ function PurchaseDetail({ purchase }) {
                 value={purchase.qrValue}
                 size={156}
                 level="H"
-                includeMargin
+                marginSize={4}
                 fgColor="#0f172a"
                 bgColor="#ffffff"
               />
@@ -122,6 +153,10 @@ function PurchaseDetail({ purchase }) {
     </div>
   );
 }
+
+PurchaseDetail.propTypes = {
+  purchase: purchaseShape.isRequired,
+};
 
 export const Header = () => {
   const [showLogoutModal, setShowLogoutModal] = useState(false);
@@ -166,13 +201,13 @@ export const Header = () => {
     };
 
     loadPurchases();
-    window.addEventListener(PURCHASE_HISTORY_UPDATED, loadPurchases);
-    window.addEventListener('storage', loadPurchases);
+    globalThis.window.addEventListener(PURCHASE_HISTORY_UPDATED, loadPurchases);
+    globalThis.window.addEventListener('storage', loadPurchases);
 
     return () => {
       active = false;
-      window.removeEventListener(PURCHASE_HISTORY_UPDATED, loadPurchases);
-      window.removeEventListener('storage', loadPurchases);
+      globalThis.window.removeEventListener(PURCHASE_HISTORY_UPDATED, loadPurchases);
+      globalThis.window.removeEventListener('storage', loadPurchases);
     };
   }, [sessionUserId]);
 
@@ -198,7 +233,7 @@ export const Header = () => {
     <>
       <nav className="sticky top-0 z-50 border-b border-slate-700 bg-slate-900/80 backdrop-blur-md">
         <div className="w-full px-4 sm:px-6 lg:px-8">
-          <div className="flex h-20 items-center">
+          <div className="relative flex h-20 items-center">
             <div className="flex min-w-[3rem] items-center gap-3">
               <div className="relative flex h-12 w-12 items-center justify-center">
                 <img
@@ -209,8 +244,8 @@ export const Header = () => {
               </div>
             </div>
 
-            <div className="flex flex-1 justify-center">
-              <div className="hidden items-center gap-12 md:flex">
+            <div className="pointer-events-none absolute left-1/2 top-1/2 hidden -translate-x-1/2 -translate-y-1/2 md:block">
+              <div className="pointer-events-auto flex items-center gap-12">
                 {navItems.map((item) => (
                   <Link key={item.path} to={item.path}>
                     <button
@@ -227,7 +262,7 @@ export const Header = () => {
               </div>
             </div>
 
-            <div className="flex min-w-[3rem] items-center justify-end gap-3">
+            <div className="ml-auto flex min-w-[3rem] items-center justify-end gap-3">
               <button
                 aria-label={mobileOpen ? 'Cerrar menu' : 'Abrir menu'}
                 aria-expanded={mobileOpen}

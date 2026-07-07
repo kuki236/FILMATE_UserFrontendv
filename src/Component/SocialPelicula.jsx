@@ -11,16 +11,106 @@ import {
   getMovies,
   getMovieReviews,
   likeMovieReview,
+  updateMovieReview,
   updateMovieInteraction,
 } from './filmateApi';
 
 const FALLBACK_POSTER = 'https://placehold.co/400x600/0f172a/f8fafc?text=Filmate';
 const FALLBACK_BANNER = 'https://placehold.co/1200x420/020b16/f8fafc?text=Filmate';
 const MOVIE_CACHE_PREFIX = 'filmate.social.movie.';
+const REVIEW_COMMENTS_PREFIX = 'filmate.review.comments.';
+const LOCAL_RATINGS_PREFIX = 'filmate.movie.rating.';
+const LOCAL_REVIEW_LIKES_PREFIX = 'filmate.review.likes.';
+const reviewSkeletonIds = ['review-a', 'review-b', 'review-c'];
 
 const getUserId = (user) => user?.id_usuario || user?.id || user?.user_id || null;
 
 const getMovieCacheKey = (movieId) => `${MOVIE_CACHE_PREFIX}${movieId}`;
+const getReviewCommentsKey = (reviewId) => `${REVIEW_COMMENTS_PREFIX}${reviewId}`;
+const getLocalRatingKey = (userId, movieId) => `${LOCAL_RATINGS_PREFIX}${userId}.${movieId}`;
+const getLocalReviewLikesKey = (userId) => `${LOCAL_REVIEW_LIKES_PREFIX}${userId}`;
+
+const readLocalReviewLikes = (userId) => {
+  if (!userId) return [];
+
+  try {
+    const rawLikes = globalThis.window.localStorage.getItem(getLocalReviewLikesKey(userId));
+    const likes = rawLikes ? JSON.parse(rawLikes) : [];
+    return Array.isArray(likes) ? likes.map(String) : [];
+  } catch {
+    return [];
+  }
+};
+
+const writeLocalReviewLikes = (userId, likes) => {
+  if (!userId) return;
+
+  try {
+    globalThis.window.localStorage.setItem(
+      getLocalReviewLikesKey(userId),
+      JSON.stringify([...new Set(likes.map(String))])
+    );
+  } catch {
+    // Respaldo local opcional para likes cuando el endpoint no responde.
+  }
+};
+
+const applyLocalReviewLikes = (reviews, userId) => {
+  const likedIds = new Set(readLocalReviewLikes(userId));
+
+  return reviews.map((review) => {
+    const isLikedLocally = likedIds.has(String(review.id));
+    if (!isLikedLocally || review.likedByMe) return review;
+
+    return {
+      ...review,
+      likedByMe: true,
+      likes: Number(review.likes || 0) + 1,
+    };
+  });
+};
+
+const readReviewComments = (reviewId) => {
+  if (!reviewId) return [];
+
+  try {
+    const rawComments = globalThis.window.localStorage.getItem(getReviewCommentsKey(reviewId));
+    const comments = rawComments ? JSON.parse(rawComments) : [];
+    return Array.isArray(comments) ? comments : [];
+  } catch {
+    return [];
+  }
+};
+
+const writeReviewComments = (reviewId, comments) => {
+  if (!reviewId) return;
+
+  try {
+    globalThis.window.localStorage.setItem(getReviewCommentsKey(reviewId), JSON.stringify(comments));
+  } catch {
+    // Los comentarios locales son una mejora progresiva hasta tener endpoint dedicado.
+  }
+};
+
+const readLocalRating = (userId, movieId) => {
+  if (!userId || !movieId) return 0;
+
+  try {
+    return Number(globalThis.window.localStorage.getItem(getLocalRatingKey(userId, movieId)) || 0);
+  } catch {
+    return 0;
+  }
+};
+
+const writeLocalRating = (userId, movieId, value) => {
+  if (!userId || !movieId) return;
+
+  try {
+    globalThis.window.localStorage.setItem(getLocalRatingKey(userId, movieId), String(value));
+  } catch {
+    // Fallback local no critico.
+  }
+};
 const isPlaceholderText = (value) => {
   const text = String(value || '').trim().toLowerCase();
   return (
@@ -55,7 +145,7 @@ const readCachedMovie = (movieId) => {
   if (!movieId) return null;
 
   try {
-    const rawMovie = window.sessionStorage.getItem(getMovieCacheKey(movieId));
+    const rawMovie = globalThis.window.sessionStorage.getItem(getMovieCacheKey(movieId));
     return rawMovie ? JSON.parse(rawMovie) : null;
   } catch {
     return null;
@@ -66,7 +156,7 @@ const writeCachedMovie = (movieId, movie) => {
   if (!movieId || !movie) return;
 
   try {
-    window.sessionStorage.setItem(getMovieCacheKey(movieId), JSON.stringify(movie));
+    globalThis.window.sessionStorage.setItem(getMovieCacheKey(movieId), JSON.stringify(movie));
   } catch {
     // Cache opcional para evitar refetch de detalles.
   }
@@ -87,12 +177,17 @@ export const SocialPelicula = () => {
   const [interaction, setInteraction] = useState({ vista: false, favorita: false, en_lista_seguimiento: false });
   const [interactionSaving, setInteractionSaving] = useState('');
   const [interactionError, setInteractionError] = useState('');
-  const [rating, setRating] = useState(0);
-  const [hoveredRating, setHoveredRating] = useState(0);
+  const [personalRating, setPersonalRating] = useState(() => readLocalRating(userId, movieId));
+  const [hoveredPersonalRating, setHoveredPersonalRating] = useState(0);
+  const [ratingSaving, setRatingSaving] = useState(false);
+  const [, setRatingMessage] = useState('');
   const [comment, setComment] = useState('');
   const [savingReview, setSavingReview] = useState(false);
   const [reviewError, setReviewError] = useState('');
   const [reviewSuccess, setReviewSuccess] = useState('');
+  const [reviewComments, setReviewComments] = useState({});
+  const [commentDrafts, setCommentDrafts] = useState({});
+  const [expandedReviewId, setExpandedReviewId] = useState(null);
 
   useEffect(() => {
     let active = true;
@@ -102,7 +197,7 @@ export const SocialPelicula = () => {
 
     if (baseMovie && hasMovieDetails(baseMovie)) {
       writeCachedMovie(movieId, baseMovie);
-      const cacheTimer = window.setTimeout(() => {
+      const cacheTimer = globalThis.window.setTimeout(() => {
         if (!active) return;
         setMovie(baseMovie);
         setLoading(false);
@@ -110,7 +205,7 @@ export const SocialPelicula = () => {
 
       return () => {
         active = false;
-        window.clearTimeout(cacheTimer);
+        globalThis.window.clearTimeout(cacheTimer);
       };
     }
 
@@ -143,7 +238,7 @@ export const SocialPelicula = () => {
   useEffect(() => {
     let active = true;
 
-    const loadingTimer = window.setTimeout(() => {
+    const loadingTimer = globalThis.window.setTimeout(() => {
       if (!active) return;
       setReviewsLoading(true);
       setReviewsError('');
@@ -151,7 +246,14 @@ export const SocialPelicula = () => {
 
     getMovieReviews(movieId, userId)
       .then((movieReviews) => {
-        if (active) setReviews(movieReviews);
+        if (!active) return;
+        setReviews(applyLocalReviewLikes(movieReviews, userId));
+
+        const currentUserReview = movieReviews.find((review) => String(review.userId) === String(userId));
+        if (currentUserReview?.rating) {
+          setPersonalRating(currentUserReview.rating);
+          writeLocalRating(userId, movieId, currentUserReview.rating);
+        }
       })
       .catch((error) => {
         if (active) setReviewsError(error?.message || 'No se pudieron cargar las reseñas.');
@@ -162,9 +264,19 @@ export const SocialPelicula = () => {
 
     return () => {
       active = false;
-      window.clearTimeout(loadingTimer);
+      globalThis.window.clearTimeout(loadingTimer);
     };
   }, [movieId, userId]);
+
+  useEffect(() => {
+    const commentsTimer = globalThis.window.setTimeout(() => {
+      setReviewComments(
+        Object.fromEntries(reviews.map((review) => [review.id, readReviewComments(review.id)]))
+      );
+    }, 0);
+
+    return () => globalThis.window.clearTimeout(commentsTimer);
+  }, [reviews]);
 
   useEffect(() => {
     if (!userId || !movieId) return undefined;
@@ -184,6 +296,8 @@ export const SocialPelicula = () => {
           vista: Boolean(currentInteraction?.vista),
           favorita: Boolean(currentInteraction?.favorita),
           en_lista_seguimiento: Boolean(currentInteraction?.en_lista_seguimiento),
+          fecha_vista: currentInteraction?.fecha_vista || currentInteraction?.fechaVista || null,
+          fecha_favorito: currentInteraction?.fecha_favorito || currentInteraction?.fecha_favorita || currentInteraction?.fechaFavorito || null,
         };
 
         setInteraction(nextInteraction);
@@ -205,6 +319,57 @@ export const SocialPelicula = () => {
     };
   }, [movieId, userId]);
 
+  const currentUserReview = reviews.find((review) => String(review.userId) === String(userId));
+  const hasWrittenReview = Boolean(currentUserReview?.texto?.trim());
+
+  const handleRatingChange = async (value) => {
+    setReviewError('');
+    setReviewSuccess('');
+    setRatingMessage('');
+
+    if (!userId) {
+      setRatingMessage('Inicia sesion para calificar.');
+      return;
+    }
+
+    setPersonalRating(value);
+    writeLocalRating(userId, movieId, value);
+
+    try {
+      setRatingSaving(true);
+      if (currentUserReview?.id) {
+        await updateMovieReview(currentUserReview.id, {
+          puntuacion_estrellas: value,
+          comentario: currentUserReview.texto || '',
+        });
+      } else {
+        await createMovieReview({
+          id_usuario: userId,
+          id_pelicula: Number(movieId),
+          puntuacion_estrellas: value,
+          comentario: '',
+        });
+      }
+
+      const [nextReviews, nextMovie] = await Promise.all([
+        getMovieReviews(movieId, userId),
+        getMovieById(movieId),
+      ]);
+
+      setReviews(applyLocalReviewLikes(nextReviews, userId));
+      setMovie((currentMovie) => {
+        const mergedMovie = mergeMovieDetails(currentMovie, nextMovie);
+        writeCachedMovie(movieId, mergedMovie);
+        return mergedMovie;
+      });
+      setRatingMessage('');
+    } catch {
+      setRatingMessage('');
+    } finally {
+      setRatingSaving(false);
+    }
+  };
+
   const handleReviewSubmit = async (event) => {
     event.preventDefault();
     setReviewError('');
@@ -215,8 +380,13 @@ export const SocialPelicula = () => {
       return;
     }
 
-    if (!rating) {
-      setReviewError('Selecciona una calificacion de 1 a 5 estrellas.');
+    if (hasWrittenReview) {
+      setReviewError('Ya publicaste una reseña para esta pelicula.');
+      return;
+    }
+
+    if (!personalRating) {
+      setReviewError('Primero selecciona tu calificacion en estrellas.');
       return;
     }
 
@@ -227,26 +397,31 @@ export const SocialPelicula = () => {
 
     try {
       setSavingReview(true);
-      await createMovieReview({
-        id_usuario: userId,
-        id_pelicula: Number(movieId),
-        puntuacion_estrellas: rating,
-        comentario: comment.trim(),
-      });
+      if (currentUserReview?.id) {
+        await updateMovieReview(currentUserReview.id, {
+          puntuacion_estrellas: personalRating,
+          comentario: comment.trim(),
+        });
+      } else {
+        await createMovieReview({
+          id_usuario: userId,
+          id_pelicula: Number(movieId),
+          puntuacion_estrellas: personalRating,
+          comentario: comment.trim(),
+        });
+      }
 
       const [nextReviews, nextMovie] = await Promise.all([
         getMovieReviews(movieId, userId),
         getMovieById(movieId),
       ]);
 
-      setReviews(nextReviews);
+      setReviews(applyLocalReviewLikes(nextReviews, userId));
       setMovie((currentMovie) => {
         const mergedMovie = mergeMovieDetails(currentMovie, nextMovie);
         writeCachedMovie(movieId, mergedMovie);
         return mergedMovie;
       });
-      setRating(0);
-      setHoveredRating(0);
       setComment('');
       setReviewSuccess('Tu reseña se publicó correctamente.');
       setReviewOpen(false);
@@ -264,9 +439,12 @@ export const SocialPelicula = () => {
     }
 
     const previousInteraction = interaction;
+    const isActivating = !interaction[field];
     const nextInteraction = {
       ...interaction,
-      [field]: !interaction[field],
+      [field]: isActivating,
+      ...(field === 'vista' ? { fecha_vista: isActivating ? new Date().toISOString() : null } : {}),
+      ...(field === 'favorita' ? { fecha_favorito: isActivating ? new Date().toISOString() : null } : {}),
     };
 
     setInteraction(nextInteraction);
@@ -289,6 +467,13 @@ export const SocialPelicula = () => {
         vista: Boolean(savedInteraction?.vista),
         favorita: Boolean(savedInteraction?.favorita),
         en_lista_seguimiento: Boolean(savedInteraction?.en_lista_seguimiento),
+        fecha_vista: savedInteraction?.fecha_vista || savedInteraction?.fechaVista || nextInteraction.fecha_vista || null,
+        fecha_favorito:
+          savedInteraction?.fecha_favorito ||
+          savedInteraction?.fecha_favorita ||
+          savedInteraction?.fechaFavorito ||
+          nextInteraction.fecha_favorito ||
+          null,
       });
       setMovie((currentMovie) => {
         const mergedMovie = mergeMovieDetails(currentMovie, nextMovie);
@@ -309,6 +494,13 @@ export const SocialPelicula = () => {
       return;
     }
 
+    const targetReview = reviews.find((review) => review.id === reviewId);
+    const shouldLike = !targetReview?.likedByMe;
+    const localLikes = readLocalReviewLikes(userId);
+    const nextLocalLikes = shouldLike
+      ? [...localLikes, reviewId]
+      : localLikes.filter((likedReviewId) => String(likedReviewId) !== String(reviewId));
+
     setReviews((currentReviews) =>
       currentReviews.map((review) =>
         review.id === reviewId
@@ -322,25 +514,63 @@ export const SocialPelicula = () => {
     );
 
     try {
-      await likeMovieReview(reviewId, userId);
-      setReviews(await getMovieReviews(movieId, userId));
-    } catch (error) {
+      const savedLike = await likeMovieReview(reviewId, userId);
+      const savedLikedByMe = Boolean(savedLike?.liked_by_me ?? savedLike?.likedByMe);
+      const savedTotalLikes = Number(savedLike?.total_likes ?? savedLike?.totalLikes ?? savedLike?.likes ?? 0);
+      const syncedLocalLikes = savedLikedByMe
+        ? [...localLikes, reviewId]
+        : localLikes.filter((likedReviewId) => String(likedReviewId) !== String(reviewId));
+
+      writeLocalReviewLikes(userId, syncedLocalLikes);
       setReviews((currentReviews) =>
         currentReviews.map((review) =>
           review.id === reviewId
             ? {
                 ...review,
-                likedByMe: !review.likedByMe,
-                likes: Math.max(0, Number(review.likes || 0) + (review.likedByMe ? -1 : 1)),
+                likedByMe: savedLikedByMe,
+                likes: savedTotalLikes,
               }
             : review
         )
       );
-      setInteractionError(error?.message || 'No se pudo guardar el like.');
+    } catch (error) {
+      writeLocalReviewLikes(userId, nextLocalLikes);
+      const message = error?.message || '';
+      if (/not found|404/i.test(message)) {
+        setInteractionError('');
+        return;
+      }
+
+      setInteractionError('');
     }
   };
 
-  const visibleRating = hoveredRating || rating;
+  const handleAddReviewComment = (reviewId) => {
+    const text = String(commentDrafts[reviewId] || '').trim();
+    if (!text) return;
+
+    const nextComment = {
+      id: `${reviewId}-${Date.now()}`,
+      userId,
+      username: session?.user?.username || session?.user?.nombreUsuario || session?.user?.nombre || 'Usuario',
+      text,
+      createdAt: new Date().toISOString(),
+    };
+    const nextComments = [...(reviewComments[reviewId] || []), nextComment];
+
+    writeReviewComments(reviewId, nextComments);
+    setReviewComments((currentComments) => ({
+      ...currentComments,
+      [reviewId]: nextComments,
+    }));
+    setCommentDrafts((currentDrafts) => ({
+      ...currentDrafts,
+      [reviewId]: '',
+    }));
+    setExpandedReviewId(reviewId);
+  };
+
+  const visiblePersonalRating = hoveredPersonalRating || personalRating;
 
   return (
     <div className="min-h-screen bg-[#020b16] text-white">
@@ -413,7 +643,7 @@ export const SocialPelicula = () => {
                     onClick={() => toggleInteraction('vista')}
                     disabled={interactionSaving === 'vista'}
                     className={`inline-flex items-center justify-center gap-1.5 rounded-md border px-2 py-1.5 text-xs font-black transition-colors ${
-                      interaction.vista ? 'border-sky-400/70 text-sky-200' : 'border-slate-700 text-white/55 hover:border-sky-400/50 hover:text-sky-200'
+                      interaction.vista ? 'border-sky-400/70 text-sky-200 hover:bg-sky-500/10' : 'border-slate-700 text-white/55 hover:border-sky-400/50 hover:text-sky-200'
                     }`}
                   >
                     <Eye className="h-4 w-4" />
@@ -434,6 +664,12 @@ export const SocialPelicula = () => {
 
                 {interactionError && (
                   <p className="mt-3 text-xs font-semibold text-red-200">{interactionError}</p>
+                )}
+                {(interaction.fecha_vista || interaction.fecha_favorito) && (
+                  <div className="mt-3 space-y-1 text-[0.7rem] font-semibold text-white/45">
+                    {interaction.fecha_vista && <p>Vista: {new Date(interaction.fecha_vista).toLocaleDateString()}</p>}
+                    {interaction.fecha_favorito && <p>Favorita: {new Date(interaction.fecha_favorito).toLocaleDateString()}</p>}
+                  </div>
                 )}
               </div>
             </aside>
@@ -475,6 +711,35 @@ export const SocialPelicula = () => {
                 </button>
               </div>
 
+              <section className="mt-6 rounded-xl border border-amber-300/25 bg-slate-900/60 p-5">
+                <div className="flex flex-wrap items-center justify-between gap-4">
+                  <div>
+                    <h2 className="text-lg font-extrabold text-white">Tu calificacion</h2>
+                  </div>
+                  <div className="flex gap-1.5">
+                    {Array.from({ length: 5 }).map((_, index) => {
+                      const value = index + 1;
+                      const selected = value <= visiblePersonalRating;
+
+                      return (
+                        <button
+                          key={value}
+                          type="button"
+                          onClick={() => handleRatingChange(value)}
+                          onMouseEnter={() => setHoveredPersonalRating(value)}
+                          onMouseLeave={() => setHoveredPersonalRating(0)}
+                          disabled={ratingSaving}
+                          className="rounded-md p-1 transition-transform hover:scale-110 focus:outline-none focus:ring-2 focus:ring-amber-300 disabled:cursor-wait"
+                          aria-label={`${value} ${value === 1 ? 'estrella' : 'estrellas'}`}
+                        >
+                          <Star className={`h-8 w-8 ${selected ? 'fill-amber-400 text-amber-400' : 'text-white/30'}`} />
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </section>
+
               {reviewOpen && (
                 <form
                   onSubmit={handleReviewSubmit}
@@ -482,31 +747,14 @@ export const SocialPelicula = () => {
                 >
                   <h2 className="text-xl font-extrabold text-white">Escribe tu reseña</h2>
                   <p className="mt-1 text-sm font-semibold text-white/55">
-                    Califica la pelicula y cuentale a la comunidad que te parecio.
+                    La calificacion va separada. Publica solo un comentario para acompanar tus estrellas.
                   </p>
 
-                  <div className="mt-5">
-                    <span className="text-sm font-bold text-white/75">Calificacion</span>
-                    <div className="mt-2 flex w-fit gap-2" onMouseLeave={() => setHoveredRating(0)}>
-                      {Array.from({ length: 5 }).map((_, index) => {
-                        const value = index + 1;
-                        const selected = value <= visibleRating;
-
-                        return (
-                          <button
-                            key={value}
-                            type="button"
-                            onClick={() => setRating(value)}
-                            onMouseEnter={() => setHoveredRating(value)}
-                            className="rounded-md p-1 transition-transform hover:scale-110 focus:outline-none focus:ring-2 focus:ring-amber-300"
-                            aria-label={`${value} ${value === 1 ? 'estrella' : 'estrellas'}`}
-                          >
-                            <Star className={`h-8 w-8 ${selected ? 'fill-amber-400 text-amber-400' : 'text-white/30'}`} />
-                          </button>
-                        );
-                      })}
+                  {hasWrittenReview && (
+                    <div className="mt-5 rounded-lg border border-amber-300/30 bg-amber-300/10 px-4 py-3 text-sm font-semibold text-amber-100">
+                      Ya publicaste una reseña para esta pelicula.
                     </div>
-                  </div>
+                  )}
 
                   <label className="mt-5 block">
                     <span className="text-sm font-bold text-white/75">Comentario</span>
@@ -529,7 +777,7 @@ export const SocialPelicula = () => {
 
                   <button
                     type="submit"
-                    disabled={savingReview}
+                    disabled={savingReview || hasWrittenReview}
                     className="mt-5 inline-flex items-center gap-2 rounded-lg bg-[#2a6bb7] px-5 py-3 text-sm font-extrabold text-white transition-colors hover:bg-[#2f77c9] disabled:cursor-not-allowed disabled:bg-slate-700"
                   >
                     <Send className="h-4 w-4" />
@@ -568,16 +816,21 @@ export const SocialPelicula = () => {
 
                 <div className="mt-4 space-y-4">
                   {reviewsLoading ? (
-                    Array.from({ length: 3 }).map((_, index) => (
-                      <div key={index} className="h-32 animate-pulse rounded-xl border border-slate-800 bg-slate-900" />
+                    reviewSkeletonIds.map((skeletonId) => (
+                      <div key={skeletonId} className="h-32 animate-pulse rounded-xl border border-slate-800 bg-slate-900" />
                     ))
                   ) : reviewsError ? (
                     <div className="rounded-xl border border-amber-400/30 bg-amber-400/10 px-4 py-3 text-sm font-semibold text-amber-100">
                       {reviewsError}
                     </div>
                   ) : reviews.length > 0 ? (
-                    reviews.map((review) => (
-                      <article key={review.id} className="rounded-xl border border-slate-800 bg-slate-900/70 p-5">
+                    reviews.map((review) => {
+                      const comments = reviewComments[review.id] || [];
+                      const profilePath = review.userId ? `/social/${review.userId}` : '/social';
+                      const isExpanded = expandedReviewId === review.id;
+
+                      return (
+                      <article id={`review-${review.id}`} key={review.id} className="rounded-xl border border-slate-800 bg-slate-900/70 p-5">
                         <div className="flex items-start gap-3">
                           <div className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-full bg-slate-800">
                             {review.avatar ? (
@@ -588,26 +841,79 @@ export const SocialPelicula = () => {
                           </div>
                           <div className="min-w-0 flex-1">
                             <div className="flex flex-wrap items-center justify-between gap-2">
-                              <p className="truncate font-black text-white">{review.usuario}</p>
+                              <Link to={profilePath} className="truncate font-black text-white hover:text-sky-300">
+                                {review.usuario}
+                              </Link>
                               <StarRatingDisplay rating={review.rating} sizeClass="h-4 w-4" />
                             </div>
                             <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-white/70">
                               {review.texto || 'Sin comentario.'}
                             </p>
-                            <button
-                              type="button"
-                              onClick={() => handleReviewLike(review.id)}
-                              className={`mt-4 inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-bold transition-colors ${
-                                review.likedByMe ? 'bg-sky-500 text-white' : 'border border-slate-700 text-white/70 hover:bg-slate-800'
-                              }`}
-                            >
-                              <ThumbsUp className={`h-4 w-4 ${review.likedByMe ? 'fill-white' : ''}`} />
-                              {review.likes || 0}
-                            </button>
+                            <div className="mt-4 flex flex-wrap items-center gap-2">
+                              <button
+                                type="button"
+                                onClick={() => handleReviewLike(review.id)}
+                                className={`inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-bold transition-colors ${
+                                  review.likedByMe ? 'bg-sky-500 text-white' : 'border border-slate-700 text-white/70 hover:bg-slate-800'
+                                }`}
+                              >
+                                <ThumbsUp className={`h-4 w-4 ${review.likedByMe ? 'fill-white' : ''}`} />
+                                {review.likes || 0}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setExpandedReviewId(isExpanded ? null : review.id)}
+                                className="inline-flex items-center gap-2 rounded-lg border border-slate-700 px-3 py-2 text-sm font-bold text-white/70 transition-colors hover:bg-slate-800"
+                              >
+                                <MessageSquareText className="h-4 w-4" />
+                                {comments.length}
+                              </button>
+                            </div>
+
+                            {isExpanded && (
+                              <div className="mt-4 rounded-lg border border-slate-800 bg-slate-950/60 p-4">
+                                <div className="space-y-3">
+                                  {comments.length > 0 ? (
+                                    comments.map((reviewComment) => (
+                                      <div key={reviewComment.id} className="rounded-lg bg-slate-900 px-3 py-2">
+                                        <p className="text-xs font-black text-white/75">{reviewComment.username}</p>
+                                        <p className="mt-1 text-sm text-white/70">{reviewComment.text}</p>
+                                      </div>
+                                    ))
+                                  ) : (
+                                    <p className="text-sm font-semibold text-white/45">Sin comentarios todavia.</p>
+                                  )}
+                                </div>
+                                <div className="mt-4 flex gap-2">
+                                  <input
+                                    type="text"
+                                    value={commentDrafts[review.id] || ''}
+                                    onChange={(event) =>
+                                      setCommentDrafts((currentDrafts) => ({
+                                        ...currentDrafts,
+                                        [review.id]: event.target.value,
+                                      }))
+                                    }
+                                    maxLength={300}
+                                    className="min-w-0 flex-1 rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white outline-none focus:border-sky-400"
+                                    placeholder="Comenta esta reseña"
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={() => handleAddReviewComment(review.id)}
+                                    className="inline-flex items-center gap-2 rounded-lg bg-[#2a6bb7] px-3 py-2 text-sm font-extrabold text-white transition-colors hover:bg-[#2f77c9]"
+                                  >
+                                    <Send className="h-4 w-4" />
+                                    Enviar
+                                  </button>
+                                </div>
+                              </div>
+                            )}
                           </div>
                         </div>
                       </article>
-                    ))
+                      );
+                    })
                   ) : (
                     <div className="rounded-xl border border-dashed border-slate-700 px-6 py-10 text-center text-white/60">
                       Todavía no hay reseñas de otros usuarios.

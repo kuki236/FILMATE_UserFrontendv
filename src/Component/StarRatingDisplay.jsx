@@ -1,6 +1,8 @@
 import { Star } from 'lucide-react';
+import PropTypes from 'prop-types';
 
 const clampRating = (rating) => Math.min(5, Math.max(0, Number(rating) || 0));
+const starValues = [1, 2, 3, 4, 5];
 
 export const StarRatingDisplay = ({
   rating,
@@ -18,11 +20,11 @@ export const StarRatingDisplay = ({
       aria-label={`${normalizedRating} de 5 estrellas`}
       title={`${normalizedRating} de 5 estrellas`}
     >
-      {Array.from({ length: 5 }).map((_, index) => {
-        const fillPercentage = Math.min(1, Math.max(0, normalizedRating - index)) * 100;
+      {starValues.map((starValue) => {
+        const fillPercentage = Math.min(1, Math.max(0, normalizedRating - (starValue - 1))) * 100;
 
         return (
-          <span key={index} className={`relative shrink-0 ${sizeClass}`} aria-hidden="true">
+          <span key={starValue} className={`relative shrink-0 ${sizeClass}`} aria-hidden="true">
             <Star className={`absolute inset-0 h-full w-full ${emptyClass}`} />
             <Star
               className={`absolute inset-0 h-full w-full ${filledClass}`}
@@ -33,6 +35,15 @@ export const StarRatingDisplay = ({
       })}
     </div>
   );
+};
+
+StarRatingDisplay.propTypes = {
+  rating: PropTypes.number.isRequired,
+  sizeClass: PropTypes.string,
+  gapClass: PropTypes.string,
+  justifyClass: PropTypes.string,
+  emptyClass: PropTypes.string,
+  filledClass: PropTypes.string,
 };
 
 export default StarRatingDisplay;

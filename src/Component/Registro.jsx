@@ -6,8 +6,8 @@ import { saveRegisteredSession } from './authSession';
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const FULL_NAME_REGEX = /^[A-Za-zÁÉÍÓÚÜÑáéíóúüñ\s]+$/;
-const USERNAME_REGEX = /^[A-Za-z0-9_]{3,20}$/;
-const PHONE_REGEX = /^[0-9]{7,15}$/;
+const USERNAME_REGEX = /^\w{3,20}$/;
+const PHONE_REGEX = /^\d{7,15}$/;
 const DOCUMENT_REGEX = /^[A-Za-z0-9]{8,15}$/;
 const REGISTRY_KEY = 'filmate-registered-users';
 
@@ -36,6 +36,20 @@ const saveRegistryEntry = ({ nombreUsuario, telefono, email }) => {
   } catch {
     // Si localStorage falla, el registro sigue funcionando.
   }
+};
+
+const validateIdentityFields = ({ fullName, username }) => {
+  if (!fullName) return 'Completa tu nombre completo.';
+  if (!FULL_NAME_REGEX.test(fullName)) {
+    return 'El nombre completo solo puede contener letras y espacios.';
+  }
+
+  if (!username) return 'El nombre de usuario es obligatorio.';
+  if (!USERNAME_REGEX.test(username)) {
+    return 'El nombre de usuario debe tener entre 3 y 20 caracteres y solo puede usar letras, números y guion bajo.';
+  }
+
+  return '';
 };
 
 export const Registro = () => {
@@ -67,15 +81,8 @@ export const Registro = () => {
     const documentNumber = formData.numeroDocumento.trim();
     const phone = formData.telefono.trim();
 
-    if (!fullName) return 'Completa tu nombre completo.';
-    if (!FULL_NAME_REGEX.test(fullName)) {
-      return 'El nombre completo solo puede contener letras y espacios.';
-    }
-
-    if (!username) return 'El nombre de usuario es obligatorio.';
-    if (!USERNAME_REGEX.test(username)) {
-      return 'El nombre de usuario debe tener entre 3 y 20 caracteres y solo puede usar letras, números y guion bajo.';
-    }
+    const identityError = validateIdentityFields({ fullName, username });
+    if (identityError) return identityError;
 
     if (!email) return 'Completa tu correo electrónico.';
     if (!EMAIL_REGEX.test(email)) {

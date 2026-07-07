@@ -1,10 +1,12 @@
 ﻿import { useCallback, useEffect, useMemo, useState } from 'react';
+import PropTypes from 'prop-types';
 import { Filter, X } from 'lucide-react';
 import Header from './Header.jsx';
 import Footer from './Footer.jsx';
 import StarRatingDisplay from './StarRatingDisplay.jsx';
 import { useNavigate } from 'react-router-dom';
-import { getCinemas, getMovies, getShowtimesByDate } from './filmateApi';
+import { getCinemas, getMovies, getShowtimesByDate, getFavoriteMovies, getUserInteractions } from './filmateApi';
+import { getAuthSession } from './authSession';
 
 const FALLBACK_MEDIA_IMAGE =
     "data:image/svg+xml;charset=UTF-8," +
@@ -29,6 +31,8 @@ const handleImageFallback = (event) => {
 };
 
 const movieSkeletons = Array.from({ length: 6 }, (_, index) => index);
+const getMovieCardKey = (pelicula) => pelicula.id || pelicula.titulo;
+const estrenoScore = (pelicula) => (pelicula.estreno ? 1 : 0);
 
 const MovieCardSkeleton = ({ large = false }) => (
     <div className="overflow-hidden rounded-3xl border border-slate-700/50 bg-slate-800/30">
@@ -39,6 +43,10 @@ const MovieCardSkeleton = ({ large = false }) => (
         </div>
     </div>
 );
+
+MovieCardSkeleton.propTypes = {
+    large: PropTypes.bool,
+};
 
 export const MenuPrincipal = () => {
     const navigate = useNavigate();
@@ -54,6 +62,7 @@ export const MenuPrincipal = () => {
     const [selectedDay, setSelectedDay] = useState('');
     const [selectedCinema, setSelectedCinema] = useState('all');
     const [selectedGenre, setSelectedGenre] = useState('all');
+        const [recommendedMovies, setRecommendedMovies] = useState([]);
     const LIMA_TIME_ZONE = 'America/Lima';
     const dateKeyFormatter = useMemo(
         () =>
@@ -275,7 +284,7 @@ export const MenuPrincipal = () => {
     const days = useMemo(() => {
         return availableDays
             .slice()
-            .sort()
+            .sort((firstDay, secondDay) => firstDay.localeCompare(secondDay))
             .map((dateKey) => ({
                 value: dateKey,
                 label: formatDayLabel(dateKey),
@@ -341,9 +350,191 @@ export const MenuPrincipal = () => {
         () =>
             filteredPeliculas
                 .slice()
-                .sort((a, b) => (b.estreno ? 1 : 0) - (a.estreno ? 1 : 0)),
+                .sort((a, b) => estrenoScore(b) - estrenoScore(a)),
         [filteredPeliculas]
     );
+
+    useEffect(() => {
+        let active = true;
+
+        const computeRecommendations = async () => {
+            try {
+                // Candidates: movies with showtimes in the next 14 days (preferred)
+                const nextDateKeys = Array.from({ length: 14 }, (_, index) => getOffsetDateKey(index)).filter(Boolean);
+                let candidateIds = new Set();
+
+                if (nextDateKeys.length > 0) {
+                    try {
+                        const dayShowtimes = await Promise.all(
+                            nextDateKeys.map((dateKey) => getShowtimesByDate(dateKey).catch(() => []))
+                        );
+                        dayShowtimes.forEach((funciones) => {
+                            (funciones || []).forEach((f) => {
+                                const pid = f?.id_pelicula || f?.id || f?.pelicula?.id || f?.pelicula?.id_pelicula;
+                                if (pid !== undefined && pid !== null) candidateIds.add(String(pid));
+                            });
+                        });
+                    } catch (err) {
+                        if (import.meta.env.DEV) console.warn('[MenuPrincipal] showtimes fetch failed', err);
+                        candidateIds = new Set();
+                    }
+                }
+
+                // If we didn't find candidates from showtimes, fall back to all movies (still independent of UI filters)
+                if (!candidateIds.size && peliculasData && peliculasData.length > 0) {
+                    peliculasData.forEach((p) => candidateIds.add(String(p.id)));
+                }
+
+                let candidates = peliculasData.filter((p) => candidateIds.has(String(p.id)));
+
+                // Gather global metric maxima for normalization
+                const maxFavorites = Math.max(1, ...candidates.map((m) => Number(m.totalFavoritos || m.totalFavoritos || 0)));
+                const maxViews = Math.max(1, ...candidates.map((m) => Number(m.totalVistas || m.totalVistas || 0) || Number(m.totalVistas || 0) || 0));
+
+                // Get user interactions if available to personalize
+                const session = getAuthSession?.() ?? null;
+                const sessionUser = session?.user;
+                const userId = sessionUser?.id || sessionUser?.id_usuario || null;
+                let interactions = [];
+                let favoriteMoviesFromApi = [];
+                if (userId) {
+                    [interactions, favoriteMoviesFromApi] = await Promise.allSettled([
+                        getUserInteractions(userId),
+                        getFavoriteMovies(userId),
+                    ]).then(([interactionsResult, favoritesResult]) => [
+                        interactionsResult.status === 'fulfilled' ? interactionsResult.value : [],
+                        favoritesResult.status === 'fulfilled' ? favoritesResult.value : [],
+                    ]);
+                }
+
+                const favoriteMovieIds = new Set(
+                    (favoriteMoviesFromApi || [])
+                        .map((movie) => String(movie.id || movie.id_pelicula || ''))
+                        .filter(Boolean)
+                );
+
+                // Always include user's favorite movies in recommendations, even if they have no upcoming showtimes.
+                favoriteMovieIds.forEach((id) => candidateIds.add(String(id)));
+
+                // Build user genre affinity from favorites and interactions
+                const genreWeights = {};
+                const viewedMovieIds = new Set();
+
+                const favoriteMovies = peliculasData.filter((m) => favoriteMovieIds.has(String(m.id)));
+                favoriteMovies.forEach((movie) => {
+                    const movieGenres = getMovieGenres(movie);
+                    movieGenres.forEach((g) => {
+                        const key = String(g).toLowerCase();
+                        genreWeights[key] = (genreWeights[key] || 0) + 10;
+                    });
+                });
+
+                (interactions || []).forEach((it) => {
+                    const mid = String(it.id_pelicula || it.id || it.pelicula?.id || it.pelicula?.id_pelicula || '');
+                    if (it.vista && !favoriteMovieIds.has(mid)) {
+                        viewedMovieIds.add(mid);
+                    }
+
+                    const weight = it.favorita ? 3 : it.puntuacion_estrellas ? 2 : it.vista ? 1 : 0.5;
+                    const movie = peliculasData.find((m) => String(m.id) === mid || String(m.id) === String(it.id_pelicula));
+                    const genres = movie ? getMovieGenres(movie) : [];
+                    genres.forEach((g) => {
+                        const key = String(g).toLowerCase();
+                        genreWeights[key] = (genreWeights[key] || 0) + weight;
+                    });
+                });
+
+                const hasUserActivity = favoriteMovieIds.size > 0 || interactions.length > 0;
+
+                const scored = candidates.map((m) => {
+                    const movieId = String(m.id);
+                    const isFavorite = favoriteMovieIds.has(movieId);
+                    const ratingNorm = (Number(m.rating) || 0) / 5;
+                    const favNorm = isFavorite ? 1 : Math.min(1, (Number(m.totalFavoritos || 0) || 0) / maxFavorites);
+                    const viewsNorm = Math.min(1, (Number(m.totalVistas || 0) || 0) / maxViews);
+
+                    const movieGenres = Array.isArray(m.generos)
+                        ? m.generos
+                        : String(m.genero || '')
+                              .split(',')
+                              .map((s) => s.trim())
+                              .filter(Boolean);
+
+                    let affinity = 0;
+                    let totalGenreWeight = 0;
+                    movieGenres.forEach((g) => {
+                        const key = String(g).toLowerCase();
+                        const w = genreWeights[key] || 0;
+                        affinity += w;
+                        totalGenreWeight += Math.abs(w);
+                    });
+
+                    const affinityNorm = totalGenreWeight > 0 ? Math.min(1, Math.max(0, affinity / totalGenreWeight)) : 0;
+                    const favoriteBoost = isFavorite ? 0.35 : 0;
+                    const communityBoost = favoriteMovieIds.size === 0 ? 0.15 : 0;
+
+                    const score = hasUserActivity
+                        ? 0.45 * affinityNorm +
+                          0.18 * ratingNorm +
+                          0.12 * viewsNorm +
+                          0.15 * favNorm +
+                          favoriteBoost +
+                          communityBoost * 0.05
+                        : 0.35 * ratingNorm + 0.30 * viewsNorm + 0.20 * favNorm + 0.15 * communityBoost;
+
+                    return {
+                        movie: m,
+                        score,
+                        primaryGenre: String(movieGenres[0] || 'other').toLowerCase(),
+                    };
+                });
+
+                const filteredScored = scored.filter((s) => !viewedMovieIds.has(String(s.movie.id)) || favoriteMovieIds.has(String(s.movie.id)));
+
+                filteredScored.sort((a, b) => b.score - a.score);
+
+                const selected = [];
+                const genreCount = {};
+                for (const item of filteredScored) {
+                    const g = item.primaryGenre || 'other';
+                    genreCount[g] = (genreCount[g] || 0);
+                    if (genreCount[g] >= 2) {
+                        continue;
+                    }
+                    selected.push(item.movie);
+                    genreCount[g] += 1;
+                    if (selected.length >= 3) break;
+                }
+
+                let idx = 0;
+                while (selected.length < 3 && idx < filteredScored.length) {
+                    const m = filteredScored[idx].movie;
+                    if (!selected.some((s) => String(s.id) === String(m.id))) {
+                        selected.push(m);
+                    }
+                    idx += 1;
+                }
+
+                if (selected.length < 3) {
+                    const extraCandidates = candidates
+                        .filter((m) => !selected.some((s) => String(s.id) === String(m.id)))
+                        .slice(0, 3 - selected.length);
+                    selected.push(...extraCandidates);
+                }
+
+                if (active) setRecommendedMovies(selected.slice(0, 3));
+            } catch (err) {
+                if (import.meta.env.DEV) console.error('[MenuPrincipal] computeRecommendations error', err);
+                if (active) setRecommendedMovies([]);
+            }
+        };
+
+        computeRecommendations();
+
+        return () => {
+            active = false;
+        };
+    }, [peliculasData, getOffsetDateKey, getMovieGenres]);
     const currentShowtimeFilterKey = selectedDay ? `${selectedDay}|${selectedCinema}` : '';
     const showtimesReadyForCurrentFilter = !selectedDay || loadedShowtimeFilterKey === currentShowtimeFilterKey;
     const isCatalogLoading =
@@ -383,11 +574,16 @@ export const MenuPrincipal = () => {
                                 No hay peliculas con funciones disponibles en la fecha seleccionada.
                             </div>
                         ) : (
-                            displayPeliculas.slice(0, 3).map((pelicula, i) => (
-                            <div
-                                key={i}
+                            (recommendedMovies.length > 0 ? recommendedMovies : (
+                                peliculasData && peliculasData.length > 0
+                                    ? peliculasData.slice().sort((a, b) => estrenoScore(b) - estrenoScore(a)).slice(0, 3)
+                                    : []
+                            )).map((pelicula) => (
+                            <button
+                                type="button"
+                                key={`recommended-${getMovieCardKey(pelicula)}`}
                                 onClick={() => irADetalle(pelicula)}
-                                className="bg-slate-800/30 backdrop-blur-sm rounded-3xl overflow-hidden border border-slate-700/50 hover:border-red-500/50 transition-all duration-300 hover:scale-105 hover:shadow-2xl hover:shadow-red-500/20 cursor-pointer group relative"
+                                className="bg-slate-800/30 backdrop-blur-sm rounded-3xl overflow-hidden border border-slate-700/50 hover:border-red-500/50 transition-all duration-300 hover:scale-105 hover:shadow-2xl hover:shadow-red-500/20 cursor-pointer group relative text-left"
                             >
                                 <div className="relative overflow-hidden">
                                     {pelicula.estreno && (
@@ -415,7 +611,7 @@ export const MenuPrincipal = () => {
                                     </p>
                                     {renderStars(pelicula.rating)}
                                 </div>
-                            </div>
+                            </button>
                             ))
                         )}
                     </div>
@@ -447,8 +643,9 @@ export const MenuPrincipal = () => {
 
                     <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
                         <div>
-                            <label className="mb-2 block text-sm font-semibold text-slate-300">Día</label>
+                            <label htmlFor="cartelera-dia" className="mb-2 block text-sm font-semibold text-slate-300">Día</label>
                             <select
+                                id="cartelera-dia"
                                 value={selectedDay}
                                 onChange={(e) => setSelectedDay(e.target.value)}
                                 className="w-full rounded-2xl border border-slate-600 bg-slate-800 px-4 py-3 text-white outline-none transition-colors focus:border-red-500"
@@ -466,8 +663,9 @@ export const MenuPrincipal = () => {
                         </div>
 
                         <div>
-                            <label className="mb-2 block text-sm font-semibold text-slate-300">Cine</label>
+                            <label htmlFor="cartelera-cine" className="mb-2 block text-sm font-semibold text-slate-300">Cine</label>
                             <select
+                                id="cartelera-cine"
                                 value={selectedCinema}
                                 onChange={(e) => setSelectedCinema(e.target.value)}
                                 className="w-full rounded-2xl border border-slate-600 bg-slate-800 px-4 py-3 text-white outline-none transition-colors focus:border-red-500"
@@ -483,8 +681,9 @@ export const MenuPrincipal = () => {
                         </div>
 
                         <div>
-                            <label className="mb-2 block text-sm font-semibold text-slate-300">Género</label>
+                            <label htmlFor="cartelera-genero" className="mb-2 block text-sm font-semibold text-slate-300">Género</label>
                             <select
+                                id="cartelera-genero"
                                 value={selectedGenre}
                                 onChange={(e) => setSelectedGenre(normalizeText(e.target.value))}
                                 className="w-full rounded-2xl border border-slate-600 bg-slate-800 px-4 py-3 text-white outline-none transition-colors focus:border-red-500"
@@ -515,11 +714,12 @@ export const MenuPrincipal = () => {
                         </div>
                     ) : (
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                            {displayPeliculas.map((pelicula, i) => (
-                                <div
-                                    key={i}
+                            {displayPeliculas.map((pelicula) => (
+                                <button
+                                    type="button"
+                                    key={`movie-${getMovieCardKey(pelicula)}`}
                                     onClick={() => irADetalle(pelicula)}
-                                    className="bg-slate-800/30 backdrop-blur-sm rounded-3xl overflow-hidden border border-slate-700/50 hover:border-red-500/50 transition-all duration-300 hover:scale-105 hover:shadow-xl hover:shadow-red-500/20 cursor-pointer group relative"
+                                    className="bg-slate-800/30 backdrop-blur-sm rounded-3xl overflow-hidden border border-slate-700/50 hover:border-red-500/50 transition-all duration-300 hover:scale-105 hover:shadow-xl hover:shadow-red-500/20 cursor-pointer group relative text-left"
                                 >
                                     <div className="relative overflow-hidden">
                                         {pelicula.estreno && (
@@ -547,7 +747,7 @@ export const MenuPrincipal = () => {
                                         </p>
                                         {renderStars(pelicula.rating)}
                                     </div>
-                                </div>
+                                </button>
                                 ))}
                         </div>
                     )}
