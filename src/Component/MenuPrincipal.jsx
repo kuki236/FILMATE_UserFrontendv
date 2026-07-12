@@ -5,8 +5,9 @@ import Header from './Header.jsx';
 import Footer from './Footer.jsx';
 import StarRatingDisplay from './StarRatingDisplay.jsx';
 import { useNavigate } from 'react-router-dom';
-import { getCinemas, getMovies, getShowtimesByDate, getFavoriteMovies, getUserInteractions } from './filmateApi';
+import { getCinemas, getMovies, getRooms, getShowtimesByDate, getFavoriteMovies } from './filmateApi';
 import { getAuthSession } from './authSession';
+import { rankMoviesByFavoriteGenres } from './recommendationUtils.js';
 
 const FALLBACK_MEDIA_IMAGE =
     "data:image/svg+xml;charset=UTF-8," +
@@ -34,9 +35,9 @@ const movieSkeletons = Array.from({ length: 6 }, (_, index) => index);
 const getMovieCardKey = (pelicula) => pelicula.id || pelicula.titulo;
 const estrenoScore = (pelicula) => (pelicula.estreno ? 1 : 0);
 
-const MovieCardSkeleton = ({ large = false }) => (
-    <div className="overflow-hidden rounded-3xl border border-slate-700/50 bg-slate-800/30">
-        <div className={`${large ? 'h-[550px]' : 'h-[420px]'} animate-pulse bg-slate-700/50`} />
+const MovieCardSkeleton = ({ large = false, className = '' }) => (
+    <div className={`overflow-hidden rounded-3xl border border-slate-700/50 bg-slate-800/30 ${className}`}>
+        <div className={`${large ? 'aspect-[2/3] md:h-[550px] md:aspect-auto' : 'aspect-[2/3] md:h-[420px] md:aspect-auto'} animate-pulse bg-slate-700/50`} />
         <div className="space-y-3 p-5">
             <div className="mx-auto h-5 w-2/3 animate-pulse rounded-full bg-slate-700/60" />
             <div className="mx-auto h-4 w-1/2 animate-pulse rounded-full bg-slate-700/40" />
@@ -52,6 +53,7 @@ export const MenuPrincipal = () => {
     const navigate = useNavigate();
     const [peliculasData, setPeliculasData] = useState([]);
     const [cinemasData, setCinemasData] = useState([]);
+    const [activeRoomIds, setActiveRoomIds] = useState([]);
     const [availableDays, setAvailableDays] = useState([]);
     const [filteredShowtimes, setFilteredShowtimes] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -62,7 +64,10 @@ export const MenuPrincipal = () => {
     const [selectedDay, setSelectedDay] = useState('');
     const [selectedCinema, setSelectedCinema] = useState('all');
     const [selectedGenre, setSelectedGenre] = useState('all');
-        const [recommendedMovies, setRecommendedMovies] = useState([]);
+    const session = getAuthSession();
+    const sessionUserId = session?.user?.id || session?.user?.id_usuario || null;
+    const [favoriteMovies, setFavoriteMovies] = useState([]);
+    const [favoritesLoading, setFavoritesLoading] = useState(Boolean(sessionUserId));
     const LIMA_TIME_ZONE = 'America/Lima';
     const dateKeyFormatter = useMemo(
         () =>
@@ -147,7 +152,7 @@ export const MenuPrincipal = () => {
         const loadMovies = async () => {
             try {
                 setLoading(true);
-                const movies = await getMovies();
+                const movies = await getMovies({ enrichRatings: false });
 
                 if (!isMounted) return;
 
@@ -181,20 +186,71 @@ export const MenuPrincipal = () => {
     useEffect(() => {
         let isMounted = true;
 
+        const loadFavorites = async () => {
+            if (!sessionUserId) {
+                setFavoriteMovies([]);
+                setFavoritesLoading(false);
+                return;
+            }
+
+            try {
+                setFavoritesLoading(true);
+                const favorites = await getFavoriteMovies(sessionUserId);
+                if (isMounted) setFavoriteMovies(favorites);
+            } catch (err) {
+                if (import.meta.env.DEV) console.warn('[MenuPrincipal] No se pudieron cargar favoritos', err);
+                if (isMounted) setFavoriteMovies([]);
+            } finally {
+                if (isMounted) setFavoritesLoading(false);
+            }
+        };
+
+        loadFavorites();
+        return () => {
+            isMounted = false;
+        };
+    }, [sessionUserId]);
+
+    useEffect(() => {
+        let isMounted = true;
+
         const loadFilters = async () => {
             try {
                 setFiltersLoading(true);
 
-                const cinemas = await getCinemas();
+                const [cinemas, rooms] = await Promise.all([getCinemas(), getRooms()]);
                 if (!isMounted) return;
-                setCinemasData(cinemas);
+                const activeCinemas = cinemas.filter((cinema) => {
+                    const status = String(cinema.estado || '').trim().toLowerCase();
+                    return !status || ['activo', 'activa', 'active'].includes(status);
+                });
+                const activeCinemaIds = new Set(activeCinemas.map((cinema) => String(cinema.id)));
+                const nextActiveRoomIds = rooms
+                    .filter((room) => {
+                        const status = String(room.estado_sala || room.estado || '').trim().toLowerCase();
+                        return (!status || ['activo', 'activa', 'active'].includes(status))
+                            && activeCinemaIds.has(String(room.id_cine));
+                    })
+                    .map((room) => String(room.id));
+                const activeRoomIdSet = new Set(nextActiveRoomIds);
+                setCinemasData(activeCinemas);
+                setActiveRoomIds(nextActiveRoomIds);
 
                 const nextDateKeys = Array.from({ length: 14 }, (_, index) => getOffsetDateKey(index)).filter(Boolean);
                 const dayEntries = await Promise.all(
                     nextDateKeys.map(async (dateKey) => {
                         try {
                             const funciones = await getShowtimesByDate(dateKey);
-                            return [dateKey, Array.isArray(funciones) ? funciones : []];
+                            return [
+                                dateKey,
+                                Array.isArray(funciones)
+                                    ? funciones.filter((showtime) => (
+                                        activeCinemaIds.has(String(showtime.id_cine))
+                                    )).filter((showtime) => (
+                                        activeRoomIdSet.has(String(showtime.id_sala))
+                                    ))
+                                    : [],
+                            ];
                         } catch (err) {
                             if (import.meta.env.DEV) {
                                 console.warn(
@@ -260,7 +316,16 @@ export const MenuPrincipal = () => {
                 });
 
                 if (!isMounted) return;
-                setFilteredShowtimes(Array.isArray(funciones) ? funciones : []);
+                const activeCinemaIds = new Set(cinemasData.map((cinema) => String(cinema.id)));
+                const activeRoomIdSet = new Set(activeRoomIds);
+                const activeShowtimes = Array.isArray(funciones)
+                    ? funciones.filter((showtime) => (
+                        activeCinemaIds.has(String(showtime.id_cine))
+                    )).filter((showtime) => (
+                        activeRoomIdSet.has(String(showtime.id_sala))
+                    ))
+                    : [];
+                setFilteredShowtimes(activeShowtimes);
                 setLoadedShowtimeFilterKey(showtimeFilterKey);
             } catch (err) {
                 if (!isMounted) return;
@@ -279,7 +344,7 @@ export const MenuPrincipal = () => {
         return () => {
             isMounted = false;
         };
-    }, [selectedCinema, selectedDay]);
+    }, [activeRoomIds, cinemasData, selectedCinema, selectedDay]);
 
     const days = useMemo(() => {
         return availableDays
@@ -354,187 +419,13 @@ export const MenuPrincipal = () => {
         [filteredPeliculas]
     );
 
-    useEffect(() => {
-        let active = true;
-
-        const computeRecommendations = async () => {
-            try {
-                // Candidates: movies with showtimes in the next 14 days (preferred)
-                const nextDateKeys = Array.from({ length: 14 }, (_, index) => getOffsetDateKey(index)).filter(Boolean);
-                let candidateIds = new Set();
-
-                if (nextDateKeys.length > 0) {
-                    try {
-                        const dayShowtimes = await Promise.all(
-                            nextDateKeys.map((dateKey) => getShowtimesByDate(dateKey).catch(() => []))
-                        );
-                        dayShowtimes.forEach((funciones) => {
-                            (funciones || []).forEach((f) => {
-                                const pid = f?.id_pelicula || f?.id || f?.pelicula?.id || f?.pelicula?.id_pelicula;
-                                if (pid !== undefined && pid !== null) candidateIds.add(String(pid));
-                            });
-                        });
-                    } catch (err) {
-                        if (import.meta.env.DEV) console.warn('[MenuPrincipal] showtimes fetch failed', err);
-                        candidateIds = new Set();
-                    }
-                }
-
-                // If we didn't find candidates from showtimes, fall back to all movies (still independent of UI filters)
-                if (!candidateIds.size && peliculasData && peliculasData.length > 0) {
-                    peliculasData.forEach((p) => candidateIds.add(String(p.id)));
-                }
-
-                let candidates = peliculasData.filter((p) => candidateIds.has(String(p.id)));
-
-                // Gather global metric maxima for normalization
-                const maxFavorites = Math.max(1, ...candidates.map((m) => Number(m.totalFavoritos || m.totalFavoritos || 0)));
-                const maxViews = Math.max(1, ...candidates.map((m) => Number(m.totalVistas || m.totalVistas || 0) || Number(m.totalVistas || 0) || 0));
-
-                // Get user interactions if available to personalize
-                const session = getAuthSession?.() ?? null;
-                const sessionUser = session?.user;
-                const userId = sessionUser?.id || sessionUser?.id_usuario || null;
-                let interactions = [];
-                let favoriteMoviesFromApi = [];
-                if (userId) {
-                    [interactions, favoriteMoviesFromApi] = await Promise.allSettled([
-                        getUserInteractions(userId),
-                        getFavoriteMovies(userId),
-                    ]).then(([interactionsResult, favoritesResult]) => [
-                        interactionsResult.status === 'fulfilled' ? interactionsResult.value : [],
-                        favoritesResult.status === 'fulfilled' ? favoritesResult.value : [],
-                    ]);
-                }
-
-                const favoriteMovieIds = new Set(
-                    (favoriteMoviesFromApi || [])
-                        .map((movie) => String(movie.id || movie.id_pelicula || ''))
-                        .filter(Boolean)
-                );
-
-                // Always include user's favorite movies in recommendations, even if they have no upcoming showtimes.
-                favoriteMovieIds.forEach((id) => candidateIds.add(String(id)));
-
-                // Build user genre affinity from favorites and interactions
-                const genreWeights = {};
-                const viewedMovieIds = new Set();
-
-                const favoriteMovies = peliculasData.filter((m) => favoriteMovieIds.has(String(m.id)));
-                favoriteMovies.forEach((movie) => {
-                    const movieGenres = getMovieGenres(movie);
-                    movieGenres.forEach((g) => {
-                        const key = String(g).toLowerCase();
-                        genreWeights[key] = (genreWeights[key] || 0) + 10;
-                    });
-                });
-
-                (interactions || []).forEach((it) => {
-                    const mid = String(it.id_pelicula || it.id || it.pelicula?.id || it.pelicula?.id_pelicula || '');
-                    if (it.vista && !favoriteMovieIds.has(mid)) {
-                        viewedMovieIds.add(mid);
-                    }
-
-                    const weight = it.favorita ? 3 : it.puntuacion_estrellas ? 2 : it.vista ? 1 : 0.5;
-                    const movie = peliculasData.find((m) => String(m.id) === mid || String(m.id) === String(it.id_pelicula));
-                    const genres = movie ? getMovieGenres(movie) : [];
-                    genres.forEach((g) => {
-                        const key = String(g).toLowerCase();
-                        genreWeights[key] = (genreWeights[key] || 0) + weight;
-                    });
-                });
-
-                const hasUserActivity = favoriteMovieIds.size > 0 || interactions.length > 0;
-
-                const scored = candidates.map((m) => {
-                    const movieId = String(m.id);
-                    const isFavorite = favoriteMovieIds.has(movieId);
-                    const ratingNorm = (Number(m.rating) || 0) / 5;
-                    const favNorm = isFavorite ? 1 : Math.min(1, (Number(m.totalFavoritos || 0) || 0) / maxFavorites);
-                    const viewsNorm = Math.min(1, (Number(m.totalVistas || 0) || 0) / maxViews);
-
-                    const movieGenres = Array.isArray(m.generos)
-                        ? m.generos
-                        : String(m.genero || '')
-                              .split(',')
-                              .map((s) => s.trim())
-                              .filter(Boolean);
-
-                    let affinity = 0;
-                    let totalGenreWeight = 0;
-                    movieGenres.forEach((g) => {
-                        const key = String(g).toLowerCase();
-                        const w = genreWeights[key] || 0;
-                        affinity += w;
-                        totalGenreWeight += Math.abs(w);
-                    });
-
-                    const affinityNorm = totalGenreWeight > 0 ? Math.min(1, Math.max(0, affinity / totalGenreWeight)) : 0;
-                    const favoriteBoost = isFavorite ? 0.35 : 0;
-                    const communityBoost = favoriteMovieIds.size === 0 ? 0.15 : 0;
-
-                    const score = hasUserActivity
-                        ? 0.45 * affinityNorm +
-                          0.18 * ratingNorm +
-                          0.12 * viewsNorm +
-                          0.15 * favNorm +
-                          favoriteBoost +
-                          communityBoost * 0.05
-                        : 0.35 * ratingNorm + 0.30 * viewsNorm + 0.20 * favNorm + 0.15 * communityBoost;
-
-                    return {
-                        movie: m,
-                        score,
-                        primaryGenre: String(movieGenres[0] || 'other').toLowerCase(),
-                    };
-                });
-
-                const filteredScored = scored.filter((s) => !viewedMovieIds.has(String(s.movie.id)) || favoriteMovieIds.has(String(s.movie.id)));
-
-                filteredScored.sort((a, b) => b.score - a.score);
-
-                const selected = [];
-                const genreCount = {};
-                for (const item of filteredScored) {
-                    const g = item.primaryGenre || 'other';
-                    genreCount[g] = (genreCount[g] || 0);
-                    if (genreCount[g] >= 2) {
-                        continue;
-                    }
-                    selected.push(item.movie);
-                    genreCount[g] += 1;
-                    if (selected.length >= 3) break;
-                }
-
-                let idx = 0;
-                while (selected.length < 3 && idx < filteredScored.length) {
-                    const m = filteredScored[idx].movie;
-                    if (!selected.some((s) => String(s.id) === String(m.id))) {
-                        selected.push(m);
-                    }
-                    idx += 1;
-                }
-
-                if (selected.length < 3) {
-                    const extraCandidates = candidates
-                        .filter((m) => !selected.some((s) => String(s.id) === String(m.id)))
-                        .slice(0, 3 - selected.length);
-                    selected.push(...extraCandidates);
-                }
-
-                if (active) setRecommendedMovies(selected.slice(0, 3));
-            } catch (err) {
-                if (import.meta.env.DEV) console.error('[MenuPrincipal] computeRecommendations error', err);
-                if (active) setRecommendedMovies([]);
-            }
-        };
-
-        computeRecommendations();
-
-        return () => {
-            active = false;
-        };
-    }, [peliculasData, getOffsetDateKey, getMovieGenres]);
+    const recommendationResult = useMemo(
+        () => rankMoviesByFavoriteGenres(peliculasData, favoriteMovies, 3),
+        [favoriteMovies, peliculasData]
+    );
+    const recommendedMovies = recommendationResult.movies;
+    const preferredRecommendationGenres = recommendationResult.preferredGenres.slice(0, 3);
+    const recommendationsLoading = loading || favoritesLoading;
     const currentShowtimeFilterKey = selectedDay ? `${selectedDay}|${selectedCinema}` : '';
     const showtimesReadyForCurrentFilter = !selectedDay || loadedShowtimeFilterKey === currentShowtimeFilterKey;
     const isCatalogLoading =
@@ -554,7 +445,7 @@ export const MenuPrincipal = () => {
     return (
         <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 flex flex-col">
             <Header />
-            <main className="flex-1 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12 w-full">
+            <main className="flex-1 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 sm:py-12 w-full">
                 {error && (
                     <div className="mb-8 rounded-2xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-amber-100">
                         {error}
@@ -562,16 +453,28 @@ export const MenuPrincipal = () => {
                 )}
 
                 {/* Recomendaciones */}
-                <section className="mb-16">
-                    <h2 className="text-4xl font-bold text-white mb-8">Recomendaciones</h2>
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-                        {isCatalogLoading ? (
+                <section className="mb-12 sm:mb-16">
+                    <div className="mb-5 flex items-end justify-between gap-4 sm:mb-8">
+                        <div>
+                            <h2 className="text-3xl font-bold text-white sm:text-4xl">Recomendaciones</h2>
+                            {!recommendationsLoading && preferredRecommendationGenres.length > 0 && (
+                                <p className="mt-2 text-sm font-semibold text-sky-300">
+                                    Según tus favoritos: {preferredRecommendationGenres
+                                        .map((genre) => genre.charAt(0).toUpperCase() + genre.slice(1))
+                                        .join(' · ')}
+                                </p>
+                            )}
+                        </div>
+                        <span className="text-sm text-slate-400 md:hidden">Desliza para ver más</span>
+                    </div>
+                    <div className="-mx-4 flex snap-x snap-mandatory gap-4 overflow-x-auto px-4 pb-3 md:mx-0 md:grid md:grid-cols-3 md:gap-8 md:overflow-visible md:px-0 md:pb-0">
+                        {recommendationsLoading ? (
                             movieSkeletons.slice(0, 3).map((item) => (
-                                <MovieCardSkeleton key={item} large />
+                                <MovieCardSkeleton key={item} large className="w-[82vw] shrink-0 snap-center md:w-auto md:min-w-0" />
                             ))
-                        ) : displayPeliculas.length === 0 ? (
+                        ) : peliculasData.length === 0 ? (
                             <div className="col-span-full rounded-3xl border border-slate-700/50 bg-slate-800/30 p-6 text-slate-300">
-                                No hay peliculas con funciones disponibles en la fecha seleccionada.
+                                No hay películas disponibles para recomendar.
                             </div>
                         ) : (
                             (recommendedMovies.length > 0 ? recommendedMovies : (
@@ -583,7 +486,7 @@ export const MenuPrincipal = () => {
                                 type="button"
                                 key={`recommended-${getMovieCardKey(pelicula)}`}
                                 onClick={() => irADetalle(pelicula)}
-                                className="bg-slate-800/30 backdrop-blur-sm rounded-3xl overflow-hidden border border-slate-700/50 hover:border-red-500/50 transition-all duration-300 hover:scale-105 hover:shadow-2xl hover:shadow-red-500/20 cursor-pointer group relative text-left"
+                                className="relative w-[82vw] shrink-0 snap-center cursor-pointer overflow-hidden rounded-3xl border border-slate-700/50 bg-slate-800/30 text-left backdrop-blur-sm transition-all duration-300 hover:border-red-500/50 hover:shadow-2xl hover:shadow-red-500/20 md:w-auto md:min-w-0 md:hover:scale-105"
                             >
                                 <div className="relative overflow-hidden">
                                     {pelicula.estreno && (
@@ -596,7 +499,7 @@ export const MenuPrincipal = () => {
                                     <img
                                         src={pelicula.imagenPoster || pelicula.imagen}
                                         alt={pelicula.titulo}
-                                        className="w-full h-[550px] object-cover group-hover:scale-110 transition-transform duration-500"
+                                        className="aspect-[2/3] w-full object-cover transition-transform duration-500 group-hover:scale-110 md:h-[550px] md:aspect-auto"
                                         onError={handleImageFallback}
                                     />
                                     <div className="absolute inset-0 bg-gradient-to-t from-slate-900 via-slate-900/50 to-transparent"></div>
@@ -618,7 +521,7 @@ export const MenuPrincipal = () => {
                 </section>
 
                 {/* Filtros */}
-                <section className="mb-16 rounded-[2rem] border border-slate-700/60 bg-slate-900/60 p-5 shadow-2xl shadow-black/20 backdrop-blur-sm">
+                <section className="mb-12 rounded-[2rem] border border-slate-700/60 bg-slate-900/60 p-5 shadow-2xl shadow-black/20 backdrop-blur-sm sm:mb-16">
                     <div className="mb-5 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                         <div>
                             <div className="mb-2 flex items-center gap-2 text-slate-200">
@@ -701,9 +604,9 @@ export const MenuPrincipal = () => {
 
                 {/* Cartelera */}
                 <section>
-                    <h2 className="text-4xl font-bold text-white mb-8">Cartelera</h2>
+                    <h2 className="mb-6 text-3xl font-bold text-white sm:mb-8 sm:text-4xl">Cartelera</h2>
                     {isCatalogLoading ? (
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                        <div className="grid grid-cols-2 gap-3 sm:gap-6 md:grid-cols-3">
                             {movieSkeletons.map((item) => (
                                 <MovieCardSkeleton key={item} />
                             ))}
@@ -713,7 +616,7 @@ export const MenuPrincipal = () => {
                             No hay peliculas con funciones para la fecha seleccionada.
                         </div>
                     ) : (
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                        <div className="grid grid-cols-2 gap-3 sm:gap-6 md:grid-cols-3">
                             {displayPeliculas.map((pelicula) => (
                                 <button
                                     type="button"
@@ -732,17 +635,17 @@ export const MenuPrincipal = () => {
                                         <img
                                             src={pelicula.imagenPoster || pelicula.imagen}
                                             alt={pelicula.titulo}
-                                            className="w-full h-[550px] object-cover group-hover:scale-110 transition-transform duration-500"
+                                            className="aspect-[2/3] w-full object-cover transition-transform duration-500 group-hover:scale-110 md:h-[550px] md:aspect-auto"
                                             onError={handleImageFallback}
                                         />
                                         <div className="absolute inset-0 bg-gradient-to-t from-slate-900 via-slate-900/40 to-transparent"></div>
                                     </div>
 
-                                    <div className="absolute bottom-0 left-0 right-0 p-5 text-center">
-                                        <h3 className="text-lg font-bold text-white mb-1.5">
+                                    <div className="absolute bottom-0 left-0 right-0 p-3 text-center sm:p-5">
+                                        <h3 className="mb-1 line-clamp-2 text-sm font-bold text-white sm:mb-1.5 sm:text-lg">
                                             {pelicula.titulo}
                                         </h3>
-                                        <p className="text-gray-300 text-sm mb-2.5">
+                                        <p className="mb-2 line-clamp-2 text-xs text-gray-300 sm:mb-2.5 sm:text-sm">
                                             {pelicula.genero}, {pelicula.duracion}, {pelicula.clasificacion}
                                         </p>
                                         {renderStars(pelicula.rating)}

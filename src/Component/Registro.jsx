@@ -1,43 +1,14 @@
 import { useState } from 'react';
 import { User, Mail, Lock, IdCard, Phone, CheckCircle } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
-import { registerUser } from './filmateApi';
-import { saveRegisteredSession } from './authSession';
+import { loginUser, registerUser } from './filmateApi';
+import { clearAuthSession, saveRegisteredSession } from './authSession';
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const FULL_NAME_REGEX = /^[A-Za-zÁÉÍÓÚÜÑáéíóúüñ\s]+$/;
 const USERNAME_REGEX = /^\w{3,20}$/;
 const PHONE_REGEX = /^\d{7,15}$/;
 const DOCUMENT_REGEX = /^[A-Za-z0-9]{8,15}$/;
-const REGISTRY_KEY = 'filmate-registered-users';
-
-const readRegistry = () => {
-  try {
-    const raw = localStorage.getItem(REGISTRY_KEY);
-    const parsed = raw ? JSON.parse(raw) : [];
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
-};
-
-const saveRegistryEntry = ({ nombreUsuario, telefono, email }) => {
-  try {
-    const current = readRegistry();
-    const next = [
-      ...current,
-      {
-        nombreUsuario: nombreUsuario.trim().toLowerCase(),
-        telefono: telefono.trim(),
-        email: email.trim().toLowerCase(),
-      },
-    ];
-    localStorage.setItem(REGISTRY_KEY, JSON.stringify(next));
-  } catch {
-    // Si localStorage falla, el registro sigue funcionando.
-  }
-};
-
 const validateIdentityFields = ({ fullName, username }) => {
   if (!fullName) return 'Completa tu nombre completo.';
   if (!FULL_NAME_REGEX.test(fullName)) {
@@ -63,6 +34,7 @@ export const Registro = () => {
     telefono: '',
   });
   const [showSuccess, setShowSuccess] = useState(false);
+  const [requiresLogin, setRequiresLogin] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -105,18 +77,6 @@ export const Registro = () => {
       }
     }
 
-    const registry = readRegistry();
-    const normalizedUsername = username.toLowerCase();
-    const normalizedPhone = phone;
-
-    if (registry.some((item) => item.nombreUsuario === normalizedUsername)) {
-      return 'Ya existe un usuario registrado con ese nombre de usuario.';
-    }
-
-    if (phone && registry.some((item) => item.telefono === normalizedPhone)) {
-      return 'Ya existe un teléfono registrado con ese número.';
-    }
-
     return '';
   };
 
@@ -139,7 +99,7 @@ export const Registro = () => {
     try {
       setLoading(true);
 
-      const createdUser = await registerUser({
+      await registerUser({
         nombre: fullName,
         username: nombreUsuario,
         correo,
@@ -149,24 +109,32 @@ export const Registro = () => {
         telefono,
       });
 
-      saveRegisteredSession({
-        ...createdUser,
-        nombre: createdUser?.nombre || fullName,
-        username: createdUser?.username || nombreUsuario,
-        correo: createdUser?.correo || correo,
-        estado: createdUser?.estado || createdUser?.estado_usuario || 'ACTIVO',
-      });
+      let loginResponse = null;
+      try {
+        loginResponse = await loginUser({ correo, contrasena: password });
+      } catch {
+        // La cuenta ya fue creada; el usuario podrá iniciar sesión manualmente si falla el auto-login.
+      }
+      const didAutoLogin = Boolean(loginResponse?.access_token && loginResponse?.user);
+      setRequiresLogin(!didAutoLogin);
 
-      saveRegistryEntry({
-        nombreUsuario,
-        telefono,
-        email: correo,
-      });
+      if (didAutoLogin) {
+        const sessionUser = loginResponse.user;
+        saveRegisteredSession({
+          ...sessionUser,
+          nombre: sessionUser?.nombre || fullName,
+          username: sessionUser?.username || nombreUsuario,
+          correo: sessionUser?.correo || correo,
+          estado: sessionUser?.estado || sessionUser?.estado_usuario || 'ACTIVO',
+        }, loginResponse.access_token);
+      } else {
+        clearAuthSession();
+      }
 
       setShowSuccess(true);
 
       setTimeout(() => {
-        navigate('/menuPrincipal');
+        navigate(didAutoLogin ? '/menuPrincipal' : '/');
       }, 2000);
     } catch (err) {
       setError(err?.message || 'No se pudo completar el registro.');
@@ -176,7 +144,7 @@ export const Registro = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-blue-950 to-slate-900 flex items-center justify-center p-4 relative overflow-hidden">
+    <main className="relative flex min-h-[100dvh] items-center justify-center overflow-x-hidden bg-gradient-to-br from-slate-900 via-blue-950 to-slate-900 px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-[max(1rem,env(safe-area-inset-top))] sm:p-6">
       <div className="absolute top-40 left-20 opacity-10 hidden lg:block">
         <img src="/popcorn.png" alt="" className="w-80 h-80 object-contain" />
       </div>
@@ -185,7 +153,7 @@ export const Registro = () => {
       </div>
 
       {showSuccess && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm animate-fadeIn">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm animate-fadeIn" role="dialog" aria-modal="true" aria-labelledby="register-success-title">
           <div className="bg-slate-800 rounded-3xl p-8 shadow-2xl border border-slate-700 max-w-md w-full mx-4 animate-scaleIn">
             <div className="flex flex-col items-center text-center">
               <div className="relative mb-6">
@@ -193,15 +161,21 @@ export const Registro = () => {
                 <CheckCircle className="w-20 h-20 text-green-500 relative animate-checkMark" />
               </div>
 
-              <h2 className="text-2xl font-bold text-white mb-2 animate-slideDown">
+              <h2 id="register-success-title" className="text-2xl font-bold text-white mb-2 animate-slideDown">
                 Registro exitoso
               </h2>
-              <p className="text-xl text-gray-300 animate-slideDown animation-delay-200">
-                Bienvenido,{' '}
-                <span className="text-red-500 font-semibold">
-                  {formData.nombreUsuario || formData.nombreCompleto || 'Usuario'}
-                </span>
-              </p>
+              {requiresLogin ? (
+                <p className="text-lg text-gray-300 animate-slideDown animation-delay-200">
+                  Tu cuenta fue creada. Te llevaremos al inicio para que ingreses con tus credenciales.
+                </p>
+              ) : (
+                <p className="text-xl text-gray-300 animate-slideDown animation-delay-200">
+                  Bienvenido,{' '}
+                  <span className="text-red-500 font-semibold">
+                    {formData.nombreUsuario || formData.nombreCompleto || 'Usuario'}
+                  </span>
+                </p>
+              )}
             </div>
           </div>
         </div>
@@ -212,26 +186,34 @@ export const Registro = () => {
           <img
             src="/favicon.png"
             alt="Filmate Logo"
-            className="w-[8vw] mx-auto"
+            className="mx-auto mb-2 h-12 w-12 object-contain sm:mb-0 sm:h-auto sm:w-[8vw]"
           />
         </div>
 
-        <div className="bg-slate-800/50 backdrop-blur-xl rounded-3xl shadow-2xl p-8 border border-slate-700/50">
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            handleSubmit();
+          }}
+          className="rounded-3xl border border-slate-700/50 bg-slate-800/50 p-5 shadow-2xl backdrop-blur-xl sm:p-8"
+        >
+          <h1 className="mb-6 text-center text-2xl font-black text-white sm:mb-8 sm:text-3xl">Crea tu cuenta Filmate</h1>
           {error && (
             <div className="mb-6 rounded-2xl border border-red-500/40 bg-red-500/10 px-4 py-3 text-red-100">
               {error}
             </div>
           )}
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div className="space-y-6">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 md:gap-6">
+            <div className="space-y-4 sm:space-y-6">
               <div>
-                <label className="flex items-center text-white font-semibold mb-3 text-lg">
+                <label htmlFor="nombreCompleto" className="flex items-center text-white font-semibold mb-3 text-lg">
                   <User className="w-5 h-5 text-red-500 mr-2" />
                   Nombre Completo
                 </label>
                 <input
                   type="text"
+                  id="nombreCompleto"
                   name="nombreCompleto"
                   value={formData.nombreCompleto}
                   onChange={handleChange}
@@ -241,12 +223,13 @@ export const Registro = () => {
               </div>
 
               <div>
-                <label className="flex items-center text-white font-semibold mb-3 text-lg">
+                <label htmlFor="email" className="flex items-center text-white font-semibold mb-3 text-lg">
                   <Mail className="w-5 h-5 text-red-500 mr-2" />
                   Email
                 </label>
                 <input
                   type="email"
+                  id="email"
                   name="email"
                   value={formData.email}
                   onChange={handleChange}
@@ -256,12 +239,13 @@ export const Registro = () => {
               </div>
 
               <div>
-                <label className="flex items-center text-white font-semibold mb-3 text-lg">
+                <label htmlFor="contrasena" className="flex items-center text-white font-semibold mb-3 text-lg">
                   <Lock className="w-5 h-5 text-red-500 mr-2" />
                   Contraseña
                 </label>
                 <input
                   type="password"
+                  id="contrasena"
                   name="contrasena"
                   value={formData.contrasena}
                   onChange={handleChange}
@@ -271,14 +255,15 @@ export const Registro = () => {
               </div>
             </div>
 
-            <div className="space-y-6">
+            <div className="space-y-4 sm:space-y-6">
               <div>
-                <label className="flex items-center text-white font-semibold mb-3 text-lg">
+                <label htmlFor="nombreUsuario" className="flex items-center text-white font-semibold mb-3 text-lg">
                   <User className="w-5 h-5 text-red-500 mr-2" />
                   Nombre de Usuario
                 </label>
                 <input
                   type="text"
+                  id="nombreUsuario"
                   name="nombreUsuario"
                   value={formData.nombreUsuario}
                   onChange={handleChange}
@@ -288,12 +273,13 @@ export const Registro = () => {
               </div>
 
               <div>
-                <label className="flex items-center text-white font-semibold mb-3 text-lg">
+                <label htmlFor="numeroDocumento" className="flex items-center text-white font-semibold mb-3 text-lg">
                   <IdCard className="w-5 h-5 text-red-500 mr-2" />
                   Documento
                 </label>
                 <input
                   type="text"
+                  id="numeroDocumento"
                   name="numeroDocumento"
                   value={formData.numeroDocumento}
                   onChange={handleChange}
@@ -303,12 +289,13 @@ export const Registro = () => {
               </div>
 
               <div>
-                <label className="flex items-center text-white font-semibold mb-3 text-lg">
+                <label htmlFor="telefono" className="flex items-center text-white font-semibold mb-3 text-lg">
                   <Phone className="w-5 h-5 text-red-500 mr-2" />
                   Teléfono (opcional)
                 </label>
                 <input
                   type="tel"
+                  id="telefono"
                   name="telefono"
                   value={formData.telefono}
                   onChange={handleChange}
@@ -321,7 +308,7 @@ export const Registro = () => {
 
           <div className="mt-8">
             <button
-              onClick={handleSubmit}
+              type="submit"
               disabled={loading}
               className="w-full bg-red-500 hover:bg-red-600 disabled:bg-red-400 disabled:cursor-not-allowed text-white font-bold py-4 rounded-full transition-all duration-300 shadow-lg shadow-red-500/30 hover:shadow-xl hover:shadow-red-500/40 transform hover:scale-105 text-lg"
             >
@@ -331,13 +318,11 @@ export const Registro = () => {
 
           <p className="text-center mt-6 text-gray-400">
             Ya tienes cuenta?{' '}
-            <Link to="/">
-              <button className="text-red-500 hover:text-red-400 font-semibold transition-colors">
-                Inicia sesión
-              </button>
+            <Link to="/" className="inline-flex min-h-11 items-center px-2 font-semibold text-red-500 transition-colors hover:text-red-400">
+              Inicia sesión
             </Link>
           </p>
-        </div>
+        </form>
       </div>
 
       <style>{`
@@ -404,7 +389,7 @@ export const Registro = () => {
           animation-fill-mode: forwards;
         }
       `}</style>
-    </div>
+    </main>
   );
 };
 

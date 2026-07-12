@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test } from './fixtures.js';
 
 test('guest can enter the public catalog and does not see social navigation', async ({ page }) => {
   await page.goto('/');
@@ -19,8 +19,11 @@ test('registered login opens the catalog and enables social navigation', async (
   await page.getByRole('button', { name: /Iniciar sesi/i }).click();
 
   await expect(page).toHaveURL(/\/menuPrincipal$/);
-  if (test.info().project.name.includes('mobile')) {
-    await page.getByRole('button', { name: 'Abrir menu' }).click();
+  await expect(page.getByText(/Según tus favoritos:/i)).toBeVisible();
+  if ((page.viewportSize()?.width || 1280) < 768) {
+    const mobileMenuButton = page.getByRole('button', { name: 'Abrir menu' });
+    await expect(mobileMenuButton).toBeVisible();
+    await mobileMenuButton.click();
   }
   await expect(page.getByRole('button', { name: 'Social' })).toBeVisible();
 

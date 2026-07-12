@@ -34,6 +34,7 @@ describe('IniciarSesion', () => {
   it('saves a registered session and redirects after successful login', async () => {
     const user = userEvent.setup();
     loginUser.mockResolvedValueOnce({
+      access_token: 'jwt-demo',
       user: { id_usuario: 5, nombre: 'Valeria', username: 'vale' },
     });
 
@@ -45,8 +46,9 @@ describe('IniciarSesion', () => {
 
     expect(await screen.findByText(/Bienvenido/i)).toBeInTheDocument();
     await waitFor(() => expect(screen.getByText('Cartelera destino')).toBeInTheDocument(), { timeout: 3_500 });
-    expect(JSON.parse(localStorage.getItem('filmate_auth_session'))).toMatchObject({
+    expect(JSON.parse(sessionStorage.getItem('filmate_auth_session'))).toMatchObject({
       mode: 'registered',
+      accessToken: 'jwt-demo',
       user: { username: 'vale' },
     });
   });
@@ -58,6 +60,6 @@ describe('IniciarSesion', () => {
     await user.click(screen.getByRole('button', { name: /entrar como invitado/i }));
 
     await waitFor(() => expect(screen.getByText('Cartelera destino')).toBeInTheDocument(), { timeout: 3_500 });
-    expect(JSON.parse(localStorage.getItem('filmate_auth_session'))).toEqual({ mode: 'guest', user: null });
+    expect(JSON.parse(sessionStorage.getItem('filmate_auth_session'))).toEqual({ mode: 'guest', user: null });
   });
 });
