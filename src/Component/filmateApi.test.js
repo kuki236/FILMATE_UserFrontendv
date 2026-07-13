@@ -293,10 +293,12 @@ describe('filmateApi requests', () => {
   });
 
   it('downloads the authoritative ticket PDF from the backend', async () => {
-    fetch.mockResolvedValueOnce(new Response(new Blob(['pdf-demo'], { type: 'application/pdf' }), {
+    const ticketPdf = new Blob(['pdf-demo'], { type: 'application/pdf' });
+    fetch.mockResolvedValueOnce({
+      ok: true,
       status: 200,
-      headers: { 'Content-Type': 'application/pdf' },
-    }));
+      blob: vi.fn().mockResolvedValue(ticketPdf),
+    });
 
     const pdf = await downloadTicketPdf(10);
 
