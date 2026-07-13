@@ -22,7 +22,7 @@ const renderRoute = () =>
 
 describe('ProtectedRoute', () => {
   it('redirects guests away from registered-only pages', () => {
-    localStorage.setItem('filmate_auth_session', JSON.stringify({ mode: 'guest', user: null }));
+    sessionStorage.setItem('filmate_auth_session', JSON.stringify({ mode: 'guest', user: null }));
 
     renderRoute();
 
@@ -31,7 +31,10 @@ describe('ProtectedRoute', () => {
   });
 
   it('renders protected content for registered sessions', () => {
-    localStorage.setItem('filmate_auth_session', JSON.stringify({ mode: 'registered', user: { id_usuario: 1 } }));
+    sessionStorage.setItem(
+      'filmate_auth_session',
+      JSON.stringify({ mode: 'registered', user: { id_usuario: 1 }, accessToken: 'jwt-demo' })
+    );
 
     renderRoute();
 

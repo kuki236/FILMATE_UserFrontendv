@@ -75,7 +75,7 @@ export const IniciarSesion = () => {
     try {
       setLoading(true);
       const response = await loginUser({ correo, contrasena: password });
-      saveRegisteredSession(response.user);
+      saveRegisteredSession(response.user, response.access_token);
       completeLogin(response.user?.nombre || response.user?.username || correo, false);
     } catch (err) {
       setError(getFriendlyLoginError(err));
@@ -101,7 +101,7 @@ export const IniciarSesion = () => {
   }, [handleLogin]);
 
   return (
-    <main className="h-screen overflow-hidden bg-gradient-to-br from-slate-900 via-blue-950 to-slate-900 flex items-center justify-center p-3 relative">
+    <main className="relative flex min-h-[100dvh] items-center justify-center overflow-x-hidden overflow-y-auto bg-gradient-to-br from-slate-900 via-blue-950 to-slate-900 px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-[max(1rem,env(safe-area-inset-top))]">
       <h1 className="sr-only">Filmate</h1>
       <div className="absolute top-24 left-12 opacity-10 hidden xl:block pointer-events-none">
         <img src="/popcorn.png" alt="" className="w-48 h-48 object-contain" />
@@ -130,16 +130,16 @@ export const IniciarSesion = () => {
         </div>
       )}
 
-      <div className="w-full max-w-3xl relative z-10 flex flex-col short:flex-row items-center justify-center gap-5">
+      <div className="relative z-10 flex w-full max-w-3xl flex-col items-center justify-center gap-4 short:flex-row">
         <div className="flex justify-center w-full short:w-1/2">
           <img
             src="/LogoTrans (2).png"
             alt="Filmate Logo"
-            className="w-[42vw] max-w-[150px] mx-auto object-contain"
+            className="mx-auto w-[clamp(6.5rem,24vw,8rem)] object-contain"
           />
         </div>
 
-        <div className="w-full max-w-md short:w-1/2 bg-slate-800/50 backdrop-blur-xl rounded-3xl shadow-2xl p-5 border border-slate-700/50">
+        <div className="w-full max-w-md rounded-3xl border border-slate-700/50 bg-slate-800/50 p-5 shadow-2xl backdrop-blur-xl short:w-1/2">
           {error && (
             <div className="mb-4 rounded-2xl border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-100">
               {error}
@@ -181,16 +181,16 @@ export const IniciarSesion = () => {
             {loading ? 'Ingresando...' : 'Iniciar sesión'}
           </button>
 
-          <p className="text-center mt-3 text-xs sm:text-sm text-gray-400">
-            No tienes cuenta?{' '}
-            <Link to="/registro" className="text-red-500 hover:text-red-400 font-semibold transition-colors">
+          <div className="mt-3 flex flex-wrap items-center justify-center gap-x-1 text-center text-sm text-gray-400">
+            <span>No tienes cuenta?</span>
+            <Link to="/registro" className="inline-flex min-h-11 items-center px-2 font-semibold text-red-500 transition-colors hover:text-red-400">
               Regístrate
             </Link>
-            {' '}o{' '}
-            <button onClick={handleGuest} className="text-red-500 hover:text-red-400 font-semibold transition-colors">
+            <span>o</span>
+            <button onClick={handleGuest} className="px-2 font-semibold text-red-500 transition-colors hover:text-red-400">
               entrar como invitado
             </button>
-          </p>
+          </div>
         </div>
       </div>
 

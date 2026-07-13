@@ -1,11 +1,24 @@
 import { useEffect, useMemo, useState } from 'react';
 import PropTypes from 'prop-types';
-import { ChevronDown, LogOut, Menu, ReceiptText, ShoppingBag, Ticket, X } from 'lucide-react';
+import {
+  ChevronDown,
+  CircleUserRound,
+  LogOut,
+  MapPin,
+  Menu,
+  Popcorn,
+  ReceiptText,
+  ShoppingBag,
+  Ticket,
+  UsersRound,
+  X,
+} from 'lucide-react';
 import { QRCodeCanvas } from 'qrcode.react';
-import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { clearAuthSession, getAuthSession, isRegisteredSession } from './authSession';
 import { getUserPurchases } from './filmateApi';
-import { getSessionUserId, PURCHASE_HISTORY_UPDATED, readPurchaseHistory } from './purchaseHistory';
+import { getSessionUserId, mergePurchaseHistory, PURCHASE_HISTORY_UPDATED, readPurchaseHistory } from './purchaseHistory';
+import PwaInstallButton from './PwaInstallButton.jsx';
 
 const formatCurrency = (value) => `S/. ${Number(value || 0).toFixed(2)}`;
 
@@ -186,6 +199,11 @@ export const Header = () => {
   const latestPurchases = useMemo(() => purchases.slice(0, 3), [purchases]);
 
   useEffect(() => {
+    document.body.classList.add('filmate-mobile-nav-active');
+    return () => document.body.classList.remove('filmate-mobile-nav-active');
+  }, []);
+
+  useEffect(() => {
     let active = true;
     const loadPurchases = async () => {
       const localPurchases = readPurchaseHistory(sessionUserId);
@@ -194,7 +212,7 @@ export const Header = () => {
       try {
         const remotePurchases = await getUserPurchases(sessionUserId);
         if (!active) return;
-        setPurchases(remotePurchases.length ? remotePurchases : localPurchases);
+        setPurchases(mergePurchaseHistory(localPurchases, remotePurchases));
       } catch {
         if (active) setPurchases(localPurchases);
       }
@@ -218,6 +236,20 @@ export const Header = () => {
     { path: '/social', label: 'Social' },
   ].filter((item) => canSeeSocial || item.path !== '/social');
 
+  const mobileNavItems = [
+    { path: '/cines', label: 'Cines', icon: MapPin },
+    { path: '/dulceria', label: 'Dulcería', icon: Popcorn },
+    { path: '/menuPrincipal', label: 'Cartelera', icon: Ticket, featured: true },
+    canSeeSocial
+      ? { path: '/social', label: 'Social', icon: UsersRound }
+      : { path: '/', label: 'Ingresar', icon: CircleUserRound },
+  ];
+
+  const handleMobileNavigate = (path) => {
+    setMobileOpen(false);
+    navigate(path);
+  };
+
   const openPurchaseDetail = (purchase) => {
     setSelectedPurchase(purchase);
     setShowPurchases(false);
@@ -231,7 +263,7 @@ export const Header = () => {
 
   return (
     <>
-      <nav className="sticky top-0 z-50 border-b border-slate-700 bg-slate-900/80 backdrop-blur-md">
+      <nav className="sticky top-0 z-50 hidden border-b border-slate-700 bg-slate-900/90 pt-[env(safe-area-inset-top)] backdrop-blur-md md:block">
         <div className="w-full px-4 sm:px-6 lg:px-8">
           <div className="relative flex h-20 items-center">
             <div className="flex min-w-[3rem] items-center gap-3">
@@ -242,22 +274,24 @@ export const Header = () => {
                   className="absolute left-1/2 top-1/2 h-9 w-9 -translate-x-1/2 -translate-y-1/2 object-contain"
                 />
               </div>
+              <PwaInstallButton variant="header" />
             </div>
 
             <div className="pointer-events-none absolute left-1/2 top-1/2 hidden -translate-x-1/2 -translate-y-1/2 md:block">
               <div className="pointer-events-auto flex items-center gap-12">
                 {navItems.map((item) => (
-                  <Link key={item.path} to={item.path}>
-                    <button
-                      className={`border-b-2 pb-1 text-lg font-semibold transition-all duration-300 ${
-                        isActive(item.path)
-                          ? 'border-[#1F5FA7] text-white'
-                          : 'border-transparent text-white hover:border-[#FF213A]'
-                      }`}
-                    >
-                      {item.label}
-                    </button>
-                  </Link>
+                  <button
+                    key={item.path}
+                    type="button"
+                    onClick={() => navigate(item.path)}
+                    className={`border-b-2 pb-1 text-lg font-semibold transition-all duration-300 ${
+                      isActive(item.path)
+                        ? 'border-[#1F5FA7] text-white'
+                        : 'border-transparent text-white hover:border-[#FF213A]'
+                    }`}
+                  >
+                    {item.label}
+                  </button>
                 ))}
               </div>
             </div>
@@ -350,17 +384,21 @@ export const Header = () => {
 
         {mobileOpen && (
           <div className="border-t border-slate-700 bg-slate-900/95 backdrop-blur-xl md:hidden">
-            <div className="flex flex-col gap-2 px-4 py-3">
+            <div className="flex flex-col gap-2 px-4 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3">
               {navItems.map((item) => (
-                <Link key={item.path} to={item.path} onClick={() => setMobileOpen(false)}>
-                  <button
-                    className={`w-full rounded-lg px-3 py-2 text-left text-base font-semibold transition-all duration-200 ${
-                      isActive(item.path) ? 'bg-[#1F5FA7] text-white' : 'text-gray-200 hover:bg-slate-800'
-                    }`}
-                  >
-                    {item.label}
-                  </button>
-                </Link>
+                <button
+                  key={item.path}
+                  type="button"
+                  onClick={() => {
+                    setMobileOpen(false);
+                    navigate(item.path);
+                  }}
+                  className={`w-full rounded-lg px-3 py-2 text-left text-base font-semibold transition-all duration-200 ${
+                    isActive(item.path) ? 'bg-[#1F5FA7] text-white' : 'text-gray-200 hover:bg-slate-800'
+                  }`}
+                >
+                  {item.label}
+                </button>
               ))}
 
               <button
@@ -388,6 +426,102 @@ export const Header = () => {
         )}
       </nav>
 
+      {mobileOpen && (
+        <div className="fixed inset-0 z-40 bg-black/55 backdrop-blur-[2px] md:hidden" onClick={() => setMobileOpen(false)}>
+          <div
+            className="absolute inset-x-3 bottom-[calc(5.25rem+env(safe-area-inset-bottom))] overflow-hidden rounded-3xl border border-slate-700 bg-slate-900 p-3 shadow-2xl shadow-black/60"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Opciones de cuenta"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <PwaInstallButton variant="menu" />
+
+            <button
+              type="button"
+              onClick={() => {
+                setMobileOpen(false);
+                setShowAllPurchases(true);
+              }}
+              className="flex w-full items-center gap-3 rounded-2xl px-4 py-3 text-left font-semibold text-slate-100 transition-colors hover:bg-slate-800"
+            >
+              <ShoppingBag className="h-5 w-5 text-sky-300" />
+              <span className="flex-1">Mis compras</span>
+              {purchases.length > 0 && (
+                <span className="rounded-full bg-sky-500/15 px-2.5 py-1 text-xs font-black text-sky-200">
+                  {purchases.length}
+                </span>
+              )}
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setMobileOpen(false);
+                setShowLogoutModal(true);
+              }}
+              className="mt-1 flex w-full items-center gap-3 rounded-2xl px-4 py-3 text-left font-semibold text-red-300 transition-colors hover:bg-red-500/10"
+            >
+              <LogOut className="h-5 w-5" />
+              Cerrar sesión
+            </button>
+          </div>
+        </div>
+      )}
+
+      <nav
+        className="fixed inset-x-0 bottom-0 z-50 border-t border-slate-700/80 bg-slate-950/95 pb-[env(safe-area-inset-bottom)] shadow-[0_-12px_30px_rgba(2,6,23,0.45)] backdrop-blur-xl md:hidden"
+        aria-label="Navegación principal móvil"
+      >
+        <div className="relative mx-auto grid h-[74px] max-w-lg grid-cols-5 px-2">
+          {mobileNavItems.map(({ path, label, icon: Icon, featured }) => {
+            const active = isActive(path);
+            return (
+              <button
+                key={path}
+                type="button"
+                onClick={() => handleMobileNavigate(path)}
+                aria-current={active ? 'page' : undefined}
+                className={`group relative flex min-w-0 flex-col items-center justify-center gap-1 font-semibold transition-colors ${
+                  featured
+                    ? 'col-start-3 row-start-1 text-white'
+                    : active
+                      ? 'text-sky-300'
+                      : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                {featured ? (
+                  <span
+                    className={`absolute -top-7 flex h-[68px] w-[68px] items-center justify-center rounded-full border-[7px] border-slate-900 shadow-xl transition-transform active:scale-95 ${
+                      active ? 'bg-red-500 text-white shadow-red-950/60' : 'bg-slate-700 text-slate-100'
+                    }`}
+                  >
+                    <Icon className="h-7 w-7" strokeWidth={2.5} />
+                  </span>
+                ) : (
+                  <Icon className="h-6 w-6" strokeWidth={active ? 2.6 : 2.1} />
+                )}
+                <span className={featured ? 'mt-9 text-[11px]' : 'text-[11px]'}>{label}</span>
+                {!featured && active && <span className="absolute bottom-1 h-1 w-1 rounded-full bg-red-500" />}
+              </button>
+            );
+          })}
+
+          <button
+            type="button"
+            aria-label={mobileOpen ? 'Cerrar menu' : 'Abrir menu'}
+            aria-expanded={mobileOpen}
+            onClick={() => setMobileOpen((current) => !current)}
+            className={`col-start-5 row-start-1 flex min-w-0 flex-col items-center justify-center gap-1 font-semibold transition-colors ${
+              mobileOpen ? 'text-sky-300' : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            {mobileOpen ? <X className="h-6 w-6" /> : <Menu className="h-6 w-6" />}
+            <span className="text-[11px]">Más</span>
+          </button>
+        </div>
+      </nav>
+
       {showLogoutModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm animate-fadeIn">
           <div className="mx-4 w-full max-w-md rounded-3xl border border-slate-700 bg-slate-800 p-8 shadow-2xl animate-scaleIn">
@@ -400,13 +534,13 @@ export const Header = () => {
               <div className="flex w-full gap-4">
                 <button
                   onClick={() => setShowLogoutModal(false)}
-                  className="flex-1 rounded-full bg-slate-700 px-6 py-3 font-semibold text-white transition-all duration-300 hover:bg-slate-600"
+                  className="h-[48px] flex-1 rounded-full bg-slate-700 px-6 font-semibold text-white transition-all duration-300 hover:bg-slate-600"
                 >
                   Cancelar
                 </button>
                 <button
                   onClick={handleLogout}
-                  className="flex-1 rounded-full bg-red-500 px-6 py-3 font-semibold text-white shadow-lg shadow-red-500/30 transition-all duration-300 hover:bg-red-600 hover:shadow-xl hover:shadow-red-500/40"
+                  className="h-[48px] flex-1 rounded-full bg-red-500 px-6 font-semibold text-white shadow-lg shadow-red-500/30 transition-all duration-300 hover:bg-red-600 hover:shadow-xl hover:shadow-red-500/40"
                 >
                   Cerrar Sesión
                 </button>

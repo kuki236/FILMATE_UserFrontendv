@@ -7,6 +7,12 @@ import StarRatingDisplay from './StarRatingDisplay.jsx';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { createSeatWebSocket, getCinemas, getMovieById, getMovieReviews, getRoomById, getRooms, getSeatMap, getShowtimesByDate, normalizeSeat } from './filmateApi';
 
+const MAX_SEATS_PER_TRANSACTION = 10;
+const isOperationalStatus = (value) => {
+    const status = String(value || '').trim().toLowerCase();
+    return !status || ['activo', 'activa', 'active'].includes(status);
+};
+
 const FALLBACK_MEDIA_IMAGE =
     "data:image/svg+xml;charset=UTF-8," +
     encodeURIComponent(`
@@ -205,7 +211,7 @@ const ReviewCard = ({ review, modal = false }) => {
                     <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
                         <Link
                             to={profilePath}
-                            className={`${usernameSizeClass} truncate font-bold text-white transition-colors hover:text-sky-300`}
+                            className={`${usernameSizeClass} inline-flex min-h-11 items-center truncate font-bold text-white transition-colors hover:text-sky-300`}
                         >
                             {review.usuario}
                         </Link>
@@ -304,7 +310,7 @@ const getCinemaEntry = ({ funcion, room, cinemaFromCatalog, cinemaName }) => {
 const getSeatGap = ({ maxSeatsInRow, seatGridWidth }) => {
     if (maxSeatsInRow > 20) return 1;
     if (maxSeatsInRow > 14) return 2;
-    if (seatGridWidth < 520) return 3;
+    if (seatGridWidth < 520) return 1;
     return 6;
 };
 
@@ -503,6 +509,12 @@ export const DetallePelicula = () => {
                 const funcionesOrdenadas = Array.isArray(funciones)
                     ? funciones
                         .filter((funcion) => getShowtimeDateKey(funcion) === selectedShowtimeDateKey)
+                        .filter((funcion) => {
+                            const room = roomsById.get(String(funcion.id_sala));
+                            const cinema = cinemasById.get(String(funcion.id_cine ?? room?.id_cine));
+                            return isOperationalStatus(room?.estado_sala || room?.estado)
+                                && isOperationalStatus(cinema?.estado);
+                        })
                         .sort((a, b) => new Date(getShowtimeDateTime(a)) - new Date(getShowtimeDateTime(b)))
                     : [];
 
@@ -543,7 +555,7 @@ export const DetallePelicula = () => {
             } catch (err) {
                 if (!isMounted) return;
                 console.error('Error cargando horarios reales:', err);
-                setShowtimesError('No se pudieron cargar los horarios reales. Se muestran horarios de respaldo.');
+                setShowtimesError('No se pudieron cargar los horarios disponibles.');
                 setShowtimeCatalog([]);
             } finally {
                 if (isMounted) {
@@ -616,8 +628,11 @@ export const DetallePelicula = () => {
         const functionId = selectedShow?.id_funcion;
         if (!functionId) return undefined;
 
-        const socket = createSeatWebSocket(functionId);
-        if (!socket) return undefined;
+        let socket = null;
+        let reconnectTimer = null;
+        let pollTimer = null;
+        let stopped = false;
+        let reconnectAttempt = 0;
 
         const handleSeatSocketMessage = (event) => {
             try {
@@ -634,14 +649,48 @@ export const DetallePelicula = () => {
             }
         };
 
-        socket.onmessage = handleSeatSocketMessage;
-
-        socket.onerror = () => {
-            console.warn('No se pudo mantener la sincronizacion en vivo de asientos.');
+        const refreshSeatMap = async () => {
+            try {
+                const response = await getSeatMap(functionId);
+                if (stopped) return;
+                const nextSeats = Array.isArray(response?.asientos) ? response.asientos : [];
+                setSeatMap(nextSeats);
+                loadedSeatMapFunctionIdRef.current = functionId;
+                setSelectedSeats((current) => keepAvailableSelectedSeats(current, nextSeats));
+                setSeatMapError('');
+            } catch {
+                // El siguiente mensaje WebSocket o ciclo de polling volverá a intentarlo.
+            }
         };
 
+        const connect = () => {
+            if (stopped) return;
+            socket = createSeatWebSocket(functionId);
+            if (!socket) return;
+
+            socket.onopen = () => {
+                reconnectAttempt = 0;
+            };
+            socket.onmessage = handleSeatSocketMessage;
+            socket.onerror = () => {
+                socket?.close();
+            };
+            socket.onclose = () => {
+                if (stopped) return;
+                const delay = Math.min(10_000, 1_000 * (2 ** reconnectAttempt));
+                reconnectAttempt += 1;
+                reconnectTimer = globalThis.window.setTimeout(connect, delay);
+            };
+        };
+
+        connect();
+        pollTimer = globalThis.window.setInterval(refreshSeatMap, 15_000);
+
         return () => {
-            socket.close();
+            stopped = true;
+            if (reconnectTimer) globalThis.window.clearTimeout(reconnectTimer);
+            if (pollTimer) globalThis.window.clearInterval(pollTimer);
+            socket?.close();
         };
     }, [selectedShow?.id_funcion]);
 
@@ -662,9 +711,9 @@ export const DetallePelicula = () => {
             <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 flex flex-col">
                 <Header />
                 <div className="flex-1 max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-20 text-center w-full">
-                    <h2 className="text-3xl font-bold text-white mb-4">
+                    <h1 className="text-3xl font-bold text-white mb-4">
                         Cargando información de la película
-                    </h2>
+                    </h1>
                     <p className="text-gray-300 mb-8">
                         Estamos trayendo género, reparto y detalles completos desde el backend.
                     </p>
@@ -679,9 +728,9 @@ export const DetallePelicula = () => {
             <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 flex flex-col">
                 <Header />
                 <div className="flex-1 max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-20 text-center w-full">
-                    <h2 className="text-3xl font-bold text-white mb-4">
+                    <h1 className="text-3xl font-bold text-white mb-4">
                         No se encontró información de la película
-                    </h2>
+                    </h1>
                     <p className="text-gray-300 mb-8">
                         Por favor vuelve a la cartelera y selecciona una película.
                     </p>
@@ -811,9 +860,14 @@ export const DetallePelicula = () => {
     const toggleSeat = (seat) => {
         if (!seat || seat.estado !== 'Disponible') return;
 
-        setSelectedSeats((prev) => {
+            setSelectedSeats((prev) => {
             if (prev.some((item) => item.id_asiento === seat.id_asiento)) {
                 return prev.filter((item) => item.id_asiento !== seat.id_asiento);
+            }
+
+            if (prev.length >= MAX_SEATS_PER_TRANSACTION) {
+                setSeatMapError(`Puedes seleccionar hasta ${MAX_SEATS_PER_TRANSACTION} asientos por compra.`);
+                return prev;
             }
 
             setSeatMapError('');
@@ -871,9 +925,12 @@ export const DetallePelicula = () => {
     const backendSeatRows = Object.entries(seatMapByRow).sort(([a], [b]) => a.localeCompare(b, 'es', { numeric: true }));
     const maxSeatsInRow = Math.max(1, ...backendSeatRows.map(([, seats]) => seats.length));
     const seatGap = getSeatGap({ maxSeatsInRow, seatGridWidth });
-    const seatLabelWidth = seatGridWidth < 520 ? 22 : 30;
+    const usesCompactSeatGrid = seatGridWidth > 0 && seatGridWidth < 520;
+    const seatLabelWidth = usesCompactSeatGrid ? 18 : 30;
     const availableSeatWidth = Math.max(0, seatGridWidth - seatLabelWidth - (seatGap * (maxSeatsInRow - 1)) - 12);
-    const responsiveSeatSize = Math.max(7, Math.min(50, Math.floor(availableSeatWidth / maxSeatsInRow) || 28));
+    const responsiveSeatSize = usesCompactSeatGrid
+        ? 24
+        : Math.max(18, Math.min(50, Math.floor(availableSeatWidth / maxSeatsInRow) || 28));
 
     const renderSeat = (seat, seatSize = 36) => {
         const seatNumber = getSeatNumber(seat);
@@ -892,8 +949,9 @@ export const DetallePelicula = () => {
                 aria-pressed={selected}
                 aria-label={`Asiento ${seat.fila}${seatNumber}, ${seat.estado ?? 'Disponible'}`}
                 title={`${seat.fila}${seatNumber} - ${seat.estado ?? 'Disponible'}`}
+                data-compact-seat="true"
                 className={[
-                    'flex min-w-0 items-center justify-center bg-transparent border-none p-0',
+                    'flex h-6 w-6 min-h-0 min-w-0 items-center justify-center rounded-full bg-transparent border-none p-0 md:h-auto md:w-auto',
                     'transition-transform duration-100 focus-visible:outline focus-visible:outline-2',
                     'focus-visible:outline-offset-2 focus-visible:outline-teal-500 focus-visible:rounded',
                     !unavailable && 'cursor-pointer hover:-translate-y-0.5 active:scale-95',
@@ -906,7 +964,20 @@ export const DetallePelicula = () => {
                   Respaldo (franja delgada) abajo → espalda del espectador.
                   Apoyabrazos a los lados del cojín.
                 */}
-                <SeatGlyph seatSize={seatSize} seatNumber={seat.numero} selected={selected} unavailable={unavailable} />
+                <span
+                    className={`inline-flex h-6 w-6 items-center justify-center rounded-full border text-[9px] font-black leading-none md:hidden ${
+                        selected
+                            ? 'border-emerald-300 bg-emerald-600 text-white'
+                            : unavailable
+                                ? 'border-red-700 bg-red-600 text-white'
+                                : 'border-slate-400 bg-slate-100 text-slate-900'
+                    }`}
+                >
+                    {seatNumber}
+                </span>
+                <span className="hidden md:block">
+                    <SeatGlyph seatSize={seatSize} seatNumber={seatNumber} selected={selected} unavailable={unavailable} />
+                </span>
             </button>
         );
     };
@@ -978,7 +1049,7 @@ export const DetallePelicula = () => {
         return (
             <div className="fixed inset-0 z-[60] bg-[#020b16] text-white">
                 <div className="flex h-full flex-col">
-                    <div className="border-b border-sky-200/60 px-3 py-3 sm:px-6 lg:px-8">
+                    <div className="border-b border-sky-200/60 px-3 pb-3 pt-[max(0.75rem,env(safe-area-inset-top))] sm:px-6 lg:px-8">
                         <div className="mx-auto grid max-w-7xl grid-cols-[minmax(4.5rem,auto)_minmax(0,1fr)_minmax(4.5rem,auto)] items-center gap-2 sm:gap-4">
                             <button
                                 onClick={() => setSelectedShow(null)}
@@ -1006,7 +1077,7 @@ export const DetallePelicula = () => {
                     <div className="flex-1 min-h-0 overflow-y-auto px-3 py-3 sm:px-6 sm:py-6 lg:px-8">
                         <div className="mx-auto w-full max-w-7xl pb-8">
                             <div className="grid gap-4 lg:grid-cols-[340px_1fr] lg:gap-6 lg:items-start">
-                            <aside className="max-h-[calc(100vh-10rem)] overflow-y-auto rounded-[1.5rem] border border-slate-700/60 bg-[#061321] p-3 shadow-2xl shadow-black/30 sm:rounded-[2rem] sm:p-5 lg:sticky lg:top-4">
+                            <aside className="order-2 rounded-[1.5rem] border border-slate-700/60 bg-[#061321] p-3 shadow-2xl shadow-black/30 sm:rounded-[2rem] sm:p-5 lg:order-1 lg:sticky lg:top-4 lg:max-h-[calc(100dvh-10rem)] lg:overflow-y-auto">
                                 <div className="overflow-hidden rounded-[1.5rem] border-4 border-[#0e1c2c] sm:rounded-[2rem]">
                                     <img
                                         src={poster}
@@ -1051,19 +1122,22 @@ export const DetallePelicula = () => {
                                     <div className="grid grid-cols-1 gap-2 text-sm font-bold sm:gap-3 sm:text-lg">
                                         <div className="flex items-center gap-4">
                                             <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-white bg-white text-slate-950 sm:h-10 sm:w-10">
-                                                <SeatGlyph seatSize={20} showNumber={false} />
+                                                <span className="h-4 w-4 rounded-full border border-slate-400 bg-slate-100 md:hidden" />
+                                                <span className="hidden md:block"><SeatGlyph seatSize={20} showNumber={false} /></span>
                                             </span>
                                             <span>Disponible</span>
                                         </div>
                                         <div className="flex items-center gap-4">
                                             <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-emerald-400 bg-emerald-400 text-slate-950 sm:h-10 sm:w-10">
-                                                <SeatGlyph seatSize={20} selected showNumber={false} />
+                                                <span className="h-4 w-4 rounded-full bg-emerald-700 md:hidden" />
+                                                <span className="hidden md:block"><SeatGlyph seatSize={20} selected showNumber={false} /></span>
                                             </span>
                                             <span>Seleccionado</span>
                                         </div>
                                         <div className="flex items-center gap-4">
                                             <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-700 bg-slate-700 text-slate-300 sm:h-10 sm:w-10">
-                                                <SeatGlyph seatSize={20} unavailable showNumber={false} />
+                                                <span className="h-4 w-4 rounded-full bg-red-600 md:hidden" />
+                                                <span className="hidden md:block"><SeatGlyph seatSize={20} unavailable showNumber={false} /></span>
                                             </span>
                                             <span>Ocupado</span>
                                         </div>
@@ -1079,7 +1153,7 @@ export const DetallePelicula = () => {
                                 </div>
                             </aside>
 
-                            <section ref={seatGridRef} className="overflow-hidden rounded-[1.5rem] border border-slate-700/60 bg-[#061321] p-3 shadow-2xl shadow-black/30 sm:rounded-[2rem] sm:p-6">
+                            <section ref={seatGridRef} className="order-1 overflow-hidden rounded-[1.5rem] border border-slate-700/60 bg-[#061321] p-3 shadow-2xl shadow-black/30 sm:rounded-[2rem] sm:p-6 lg:order-2">
                                 <div className="mb-4 text-center sm:mb-5">
                                     <div className="mx-auto h-6 w-full rounded-full bg-sky-200/90 text-center text-[0.75rem] font-black uppercase tracking-[0.22em] text-slate-600 sm:h-8 sm:text-2xl sm:tracking-[0.7em]">
                                         Pantalla
@@ -1093,7 +1167,7 @@ export const DetallePelicula = () => {
                                         {seatMapError}
                                     </div>
                                 ) : selectedShow?.id_funcion && seatMap.length > 0 ? (
-                                    <div className="space-y-4 sm:space-y-5">
+                                    <>
                                         <div className="mb-3 flex flex-wrap items-center justify-center gap-3 text-xs text-slate-200">
                                             <span className="rounded-full border border-slate-600 bg-slate-900/70 px-3 py-1">
                                                 Sala #{selectedShow.id_sala}
@@ -1105,37 +1179,45 @@ export const DetallePelicula = () => {
                                                 Seleccionados: {selectedSeats.length}
                                             </span>
                                         </div>
-                                        {backendSeatRows.map(([row, seats]) => {
-                                            const sortedSeats = seats
-                                                .slice()
-                                                .sort((a, b) => Number(getSeatNumber(a)) - Number(getSeatNumber(b)));
-
-                                            return (
+                                        <div className="-mx-1 overflow-x-auto overscroll-x-contain px-1 pb-3 [scrollbar-width:thin]">
                                             <div
-                                                key={row}
-                                                className="grid min-w-0 items-center"
-                                                style={{
-                                                    gridTemplateColumns: `${seatLabelWidth}px minmax(0, 1fr)`,
-                                                    columnGap: `${seatGap}px`,
-                                                }}
+                                                className="space-y-2 md:space-y-5"
                                             >
-                                                <div className="relative z-10 text-center text-[0.65rem] font-black uppercase text-[#7fb0ff] sm:text-lg">
-                                                    {row}
-                                                </div>
+                                                {backendSeatRows.map(([row, seats]) => {
+                                                    const sortedSeats = seats
+                                                        .slice()
+                                                        .sort((a, b) => Number(getSeatNumber(a)) - Number(getSeatNumber(b)));
 
-                                                <div
-                                                    className="grid min-w-0 items-center"
-                                                    style={{
-                                                        gridTemplateColumns: `repeat(${sortedSeats.length}, minmax(0, 1fr))`,
-                                                        columnGap: `${seatGap}px`,
-                                                    }}
-                                                >
-                                                    {sortedSeats.map((seat) => renderSeat(seat, responsiveSeatSize))}
-                                                </div>
+                                                    return (
+                                                        <div
+                                                            key={row}
+                                                            className="grid min-w-0 items-center"
+                                                            style={{
+                                                                gridTemplateColumns: `${seatLabelWidth}px minmax(0, 1fr)`,
+                                                                columnGap: `${seatGap}px`,
+                                                            }}
+                                                        >
+                                                            <div className="relative z-10 text-center text-[0.65rem] font-black uppercase text-[#7fb0ff] sm:text-lg">
+                                                                {row}
+                                                            </div>
+
+                                                            <div
+                                                                className="grid min-w-0 items-center"
+                                                                style={{
+                                                                    gridTemplateColumns: usesCompactSeatGrid
+                                                                        ? `repeat(${sortedSeats.length}, minmax(0, 1fr))`
+                                                                        : `repeat(${sortedSeats.length}, minmax(0, 1fr))`,
+                                                                    columnGap: `${seatGap}px`,
+                                                                }}
+                                                            >
+                                                                {sortedSeats.map((seat) => renderSeat(seat, responsiveSeatSize))}
+                                                            </div>
+                                                        </div>
+                                                    );
+                                                })}
                                             </div>
-                                            );
-                                        })}
-                                    </div>
+                                        </div>
+                                    </>
                                 ) : selectedShow?.id_funcion ? (
                                     <div className="rounded-2xl border border-slate-700 bg-slate-900/80 px-4 py-8 text-center text-slate-200">
                                         No hay asientos disponibles para esta función.
@@ -1181,7 +1263,7 @@ export const DetallePelicula = () => {
                                 href={trailerUrl}
                                 target="_blank"
                                 rel="noreferrer"
-                                className="absolute bottom-3 left-3 rounded-full bg-black/60 px-3 py-2 text-xs font-semibold text-white backdrop-blur-sm transition-colors hover:bg-black/80 sm:bottom-4 sm:left-4 sm:px-4 sm:text-sm"
+                                className="absolute bottom-3 left-3 inline-flex min-h-11 items-center rounded-full bg-black/60 px-3 py-2 text-xs font-semibold text-white backdrop-blur-sm transition-colors hover:bg-black/80 sm:bottom-4 sm:left-4 sm:px-4 sm:text-sm"
                             >
                                 Abrir en YouTube
                             </a>
@@ -1240,9 +1322,9 @@ export const DetallePelicula = () => {
                         <div className="bg-slate-800/30 backdrop-blur-sm rounded-3xl overflow-hidden border border-slate-700/50">
                             <img src={poster} alt={titulo} className="w-full h-[600px] object-cover" onError={handleImageFallback} />
                             <div className="p-6 text-center">
-                                <h2 className="mb-2 px-1 text-center text-[clamp(1.2rem,4.5vw,2.2rem)] font-bold leading-tight text-white whitespace-normal break-normal [overflow-wrap:normal] [word-break:normal] [hyphens:none] [text-wrap:balance] sm:text-[clamp(1.5rem,2.8vw,2.6rem)] lg:text-[clamp(1.35rem,1.55vw,2.6rem)]">
+                                <h1 className="mb-2 px-1 text-center text-[clamp(1.2rem,4.5vw,2.2rem)] font-bold leading-tight text-white whitespace-normal break-normal [overflow-wrap:normal] [word-break:normal] [hyphens:none] [text-wrap:balance] sm:text-[clamp(1.5rem,2.8vw,2.6rem)] lg:text-[clamp(1.35rem,1.55vw,2.6rem)]">
                                     {titulo}
-                                </h2>
+                                </h1>
                                 <div className="mb-4 flex flex-wrap justify-center gap-2">
                                     {generoChips.map((item) => (
                                         <span

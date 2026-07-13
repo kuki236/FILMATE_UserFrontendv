@@ -171,6 +171,18 @@ const cinemas = [
   },
 ];
 
+const rooms = cinemas.flatMap((cinema, cinemaIndex) =>
+  Array.from({ length: 4 }, (_, roomIndex) => ({
+    id_sala: cinemaIndex * 4 + roomIndex + 1,
+    id_cine: cinema.id_cine,
+    nombre_sala: roomIndex % 2 === 0 ? `Sala ${roomIndex + 1} - IMAX` : `Sala ${roomIndex + 1} - Estándar`,
+    tipo_sala: roomIndex % 2 === 0 ? 'IMAX' : 'Stand.',
+    tipo_formato: roomIndex % 2 === 0 ? '3D' : '2D',
+    capacidad_asientos: 168,
+    estado_sala: 'Activa',
+  })),
+);
+
 const users = [
   {
     id_usuario: 5,
@@ -228,8 +240,8 @@ const json = (res, status, body) => {
   res.writeHead(status, {
     'Content-Type': 'application/json; charset=utf-8',
     'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Headers': 'Content-Type',
-    'Access-Control-Allow-Methods': 'GET,POST,PUT,OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+    'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS',
   });
   res.end(JSON.stringify(body));
 };
@@ -250,7 +262,7 @@ const readBody = (req) =>
   });
 
 const showtimesFor = (dateKey) => {
-  const times = ['16:00:00', '18:15:00', '20:30:00'];
+  const times = ['16:00:00', '18:15:00', '23:30:00'];
   const result = [];
   let id = 1000;
 
@@ -316,8 +328,8 @@ const server = http.createServer(async (req, res) => {
   if (req.method === 'OPTIONS') {
     res.writeHead(204, {
       'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Headers': 'Content-Type',
-      'Access-Control-Allow-Methods': 'GET,POST,PUT,OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+      'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS',
     });
     res.end();
     return;
@@ -381,6 +393,18 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  if (path === '/client/rooms/' && req.method === 'GET') {
+    json(res, 200, rooms);
+    return;
+  }
+
+  const roomMatch = path.match(/^\/client\/rooms\/(\d+)$/);
+  if (roomMatch && req.method === 'GET') {
+    const room = rooms.find((item) => String(item.id_sala) === roomMatch[1]);
+    json(res, room ? 200 : 404, room || { detail: 'Sala no encontrada' });
+    return;
+  }
+
   const cinemaMatch = path.match(/^\/client\/cinemas\/(\d+)$/);
   if (cinemaMatch && req.method === 'GET') {
     json(res, 200, cinemas.find((item) => String(item.id_cine) === cinemaMatch[1]) || cinemas[0]);
@@ -423,6 +447,42 @@ const server = http.createServer(async (req, res) => {
 
   if (path === '/client/snacks/products' && req.method === 'GET') {
     json(res, 200, products);
+    return;
+  }
+
+  if (path === '/client/snacks/cart/calculate' && req.method === 'POST') {
+    const body = await readBody(req);
+    const items = Array.isArray(body.items) ? body.items : [];
+    const subtotal = items.reduce((total, item) => {
+      const product = products.find((entry) => String(entry.id_producto) === String(item.id_producto));
+      return total + Number(product?.precio || 0) * Number(item.cantidad || 0);
+    }, 0);
+    json(res, 200, { subtotal, items });
+    return;
+  }
+
+  if (path === '/client/payments/metodos-prueba' && req.method === 'GET') {
+    json(res, 200, {
+      tarjetas: [{
+        resultado: 'aprobado',
+        numero: '4551700000000004',
+        marca: 'Visa',
+        cvv: '123',
+        vencimiento: '11/30',
+      }],
+      yape: [{ resultado: 'aprobado', celular: '999111222' }],
+      yape_otp_valido: '123456',
+    });
+    return;
+  }
+
+  if (path === '/client/payments/tokenize/tarjeta' && req.method === 'POST') {
+    json(res, 200, { token: 'tok_demo_card', marca: 'Visa', error: null });
+    return;
+  }
+
+  if (path === '/client/payments/tokenize/yape' && req.method === 'POST') {
+    json(res, 200, { token: 'tok_demo_yape', error: null });
     return;
   }
 
@@ -494,6 +554,59 @@ const server = http.createServer(async (req, res) => {
   if (favoriteMatch && req.method === 'PUT') {
     const body = await readBody(req);
     json(res, 200, { success: true, movie_ids: body.movie_ids || [] });
+    return;
+  }
+
+  const purchasesMatch = path.match(/^\/client\/users\/(\d+)\/purchases$/);
+  if (purchasesMatch && req.method === 'GET') {
+    json(res, 200, []);
+    return;
+  }
+
+  const interactionsMatch = path.match(/^\/client\/interacciones\/usuario\/(\d+)$/);
+  if (interactionsMatch && req.method === 'GET') {
+    json(res, 200, []);
+    return;
+  }
+
+  const movieInteractionMatch = path.match(/^\/client\/interacciones\/usuario\/(\d+)\/pelicula\/(\d+)$/);
+  if (movieInteractionMatch && req.method === 'GET') {
+    json(res, 200, {
+      id_usuario: Number(movieInteractionMatch[1]),
+      id_pelicula: Number(movieInteractionMatch[2]),
+      vista: false,
+      favorita: false,
+      en_lista_seguimiento: false,
+    });
+    return;
+  }
+
+  const movieReviewsMatch = path.match(/^\/client\/reviews\/movie\/(\d+)$/);
+  if (movieReviewsMatch && req.method === 'GET') {
+    json(res, 200, [
+      {
+        id_resena: 101,
+        id_usuario: 6,
+        id_pelicula: Number(movieReviewsMatch[1]),
+        puntuacion_estrellas: 5,
+        comentario: 'Una experiencia cinematográfica excelente.',
+        fecha_publicacion: new Date().toISOString(),
+        usuario: users[1],
+        total_likes: 3,
+        liked_by_viewer: false,
+      },
+      {
+        id_resena: 102,
+        id_usuario: 7,
+        id_pelicula: Number(movieReviewsMatch[1]),
+        puntuacion_estrellas: 4,
+        comentario: 'Gran propuesta visual y muy entretenida.',
+        fecha_publicacion: new Date(Date.now() - 86_400_000).toISOString(),
+        usuario: users[2],
+        total_likes: 1,
+        liked_by_viewer: false,
+      },
+    ]);
     return;
   }
 

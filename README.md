@@ -24,8 +24,8 @@ Filmate es una interfaz web pensada para una experiencia visual moderna y rapida
 
 ## Requisitos
 
-- Node.js 18 o superior
-- npm 9 o superior
+- Node.js 20.19.x o 22.12 o superior
+- npm 10 o superior
 
 ## Instalacion
 
@@ -35,6 +35,20 @@ Filmate es una interfaz web pensada para una experiencia visual moderna y rapida
 ```bash
 npm install
 ```
+
+3. Copia `.env.example` a `.env.local` si necesitas cambiar la URL del backend.
+
+## Variables de entorno
+
+```env
+VITE_API_URL=/api
+VITE_WS_URL=
+```
+
+- `VITE_API_URL`: URL base de la API. En desarrollo, `/api` usa el proxy de Vite hacia `http://127.0.0.1:8000`.
+- `VITE_WS_URL`: URL base opcional para WebSocket, sin `/ws/seats`. Si se omite, se deriva desde `VITE_API_URL`.
+
+No coloques tokens, contraseñas ni secretos en variables `VITE_*`: Vite las incluye en el JavaScript público.
 
 ## Scripts disponibles
 
@@ -62,6 +76,35 @@ npm run preview
 
 Sirve la build de produccion de forma local.
 
+## Despliegue
+
+La configuración recomendada es servir frontend y backend bajo el mismo dominio:
+
+- `/` sirve el contenido de `dist/`.
+- `/api/*` se reenvía al backend eliminando el prefijo `/api`.
+- `/api/ws/*` se reenvía como WebSocket al backend eliminando el prefijo `/api`.
+- Toda ruta que no sea un archivo ni API debe responder con `dist/index.html`, porque la aplicación usa `BrowserRouter`.
+
+La build está preparada para publicarse en la raíz del dominio. Si se necesita una subruta como `/filmate/`, primero deben configurarse el `base` de Vite, el `basename` del router y las rutas de recursos estáticos.
+
+El backend actual no configura CORS. Si frontend y backend se publican en dominios distintos, el backend deberá autorizar explícitamente el origen del frontend; definir solamente `VITE_API_URL` no evita esa restricción del navegador.
+
+Antes de desplegar:
+
+```bash
+npm ci
+npm run lint
+npm run test
+npm run build
+```
+
+### Contrato comercial actual
+
+- El precio de entradas proviene de `precio_base` de cada función.
+- Los precios y el stock de dulcería provienen de los endpoints públicos de snacks y se revalidan antes del pago.
+- El frontend no consulta rutas administrativas ni aplica tasa, IVA, tipos de entrada o la matriz sala/formato, porque el backend todavía no publica ni cobra esas reglas.
+- La compra exclusiva de dulcería permanece deshabilitada hasta que el backend acepte órdenes sin función ni asientos.
+
 ### Lint
 
 ```bash
@@ -79,7 +122,7 @@ npm run test:e2e
 npm run test:all
 ```
 
-Las pruebas unitarias e integracion usan Vitest y Testing Library. Las E2E usan Playwright con un backend mock local. La documentacion completa esta en `docs/testing/`.
+Las pruebas unitarias e integracion usan Vitest y Testing Library. Las E2E crean una build de producción y ejecutan Playwright contra `dist` con un backend mock local. La documentacion completa esta en `docs/testing/`.
 
 Para generar el informe PDF de pruebas:
 
