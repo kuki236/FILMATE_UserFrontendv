@@ -5,10 +5,22 @@ import Header from './Header.jsx';
 import Footer from './Footer.jsx';
 import { AlertTriangle, ArrowLeft, CheckCircle2, CreditCard, LockKeyhole, Minus, Plus, ShieldCheck, ShoppingCart, Smartphone, X } from 'lucide-react';
 import { QRCodeCanvas } from 'qrcode.react';
-import jsPDF from 'jspdf';
-import { checkoutOrder, getSnackProducts, getSystemConfig } from './filmateApi';
+import {
+  calculateSnackCart,
+  checkoutOrder,
+  downloadTicketPdf,
+  getCinemas,
+  getPaymentTestMethods,
+  getRooms,
+  getSeatMap,
+  getShowtimesByDate,
+  getSnackProducts,
+  tokenizeCardPayment,
+  tokenizeYapePayment,
+} from './filmateApi';
 import { getAuthSession } from './authSession';
 import { addPurchaseToHistory, getSessionUserId } from './purchaseHistory';
+import { buildLocalSnackOnlyCheckout } from './dulceriaFlowUtils';
 
 const productosData = {
   combos: [],
@@ -37,19 +49,25 @@ const paymentOptions = [
     description: 'Pago rápido con código o número.',
     icon: Smartphone,
   },
-  {
-    id: 'plin',
-    label: 'Plin',
-    description: 'Transferencia instantánea.',
-    icon: Smartphone,
-  },
 ];
+
+const BOOKING_CONTEXT_KEY = 'filmate-booking-context';
+
+const readStoredBookingContext = () => {
+  try {
+    const raw = sessionStorage.getItem(BOOKING_CONTEXT_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+};
 
 const cartItemShape = PropTypes.shape({
   id: PropTypes.oneOfType([PropTypes.string, PropTypes.number]).isRequired,
   nombre: PropTypes.string.isRequired,
   cantidad: PropTypes.number.isRequired,
   precio: PropTypes.number.isRequired,
+  stock: PropTypes.number,
 });
 
 const bookingContextShape = PropTypes.shape({
@@ -257,7 +275,8 @@ function VerificationModal({
                   <span className="w-5 text-center text-white">{item.cantidad}</span>
                   <button
                     onClick={() => onUpdateQuantity(item.id, item.cantidad + 1)}
-                    className="flex h-7 w-7 items-center justify-center rounded-full bg-yellow-400 text-black transition-colors hover:bg-yellow-500"
+                    disabled={Number.isFinite(item.stock) && item.cantidad >= item.stock}
+                    className="flex h-7 w-7 items-center justify-center rounded-full bg-yellow-400 text-black transition-colors hover:bg-yellow-500 disabled:cursor-not-allowed disabled:opacity-40"
                   >
                     <Plus className="h-3 w-3" />
                   </button>
@@ -377,8 +396,6 @@ const getPaymentValidation = ({ method, cardForm, walletForm }) => {
 function PaymentModal({
   paymentTotal,
   paymentSubtotal,
-  serviceFee,
-  taxAmount,
   isSeatFlow,
   seatsCount,
   reservationTotal,
@@ -387,6 +404,7 @@ function PaymentModal({
   bookingContext,
   selectedPaymentMethod,
   selectedPayment,
+  paymentTestMethods,
   isProcessingPayment,
   onSelectPaymentMethod,
   onRequestExit,
@@ -423,13 +441,50 @@ function PaymentModal({
   const handleConfirm = () => {
     if (!validation.valid || isProcessingPayment) return;
 
+    const [expiryMonth, expiryYear] = cardForm.expiry.split('/').map(Number);
+
     onConfirmPayment({
       metodo_pago: paymentMethodLabel,
-      provider: 'Filmate Pago',
-      installments: selectedPaymentMethod === 'tarjeta' ? Number(cardForm.installments) : 1,
-      brand: selectedPaymentMethod === 'tarjeta' ? cardBrand : selectedPayment?.label,
+      paymentKind: selectedPaymentMethod,
+      tokenizationPayload: selectedPaymentMethod === 'tarjeta'
+        ? {
+            numero_tarjeta: onlyDigits(cardForm.number),
+            cvv: onlyDigits(cardForm.cvv),
+            mes_expiracion: expiryMonth,
+            anio_expiracion: 2000 + expiryYear,
+            titular: cardForm.holder.trim(),
+          }
+        : {
+            celular: onlyDigits(walletForm.phone),
+            codigo_otp: onlyDigits(walletForm.approvalCode),
+          },
     });
   };
+
+  const approvedCard = paymentTestMethods?.tarjetas?.find((card) => card.resultado === 'aprobado');
+  const approvedYape = paymentTestMethods?.yape?.find((wallet) => wallet.resultado === 'aprobado');
+  const applyDemoCredentials = () => {
+    if (selectedPaymentMethod === 'tarjeta' && approvedCard) {
+      setCardForm((current) => ({
+        ...current,
+        number: formatCardNumber(approvedCard.numero || ''),
+        holder: 'USUARIO DEMO',
+        expiry: approvedCard.vencimiento || '11/30',
+        cvv: approvedCard.cvv || '123',
+        document: '74859612',
+      }));
+      return;
+    }
+
+    if (selectedPaymentMethod === 'yape' && approvedYape) {
+      setWalletForm({
+        phone: approvedYape.celular || '',
+        document: '74859612',
+        approvalCode: paymentTestMethods?.yape_otp_valido || '',
+      });
+    }
+  };
+  const hasDemoCredentials = selectedPaymentMethod === 'tarjeta' ? Boolean(approvedCard) : Boolean(approvedYape);
 
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/70 p-3 sm:items-center sm:p-4">
@@ -453,18 +508,6 @@ function PaymentModal({
                 <span>Subtotal</span>
                 <span>S/. {paymentSubtotal.toFixed(2)}</span>
               </div>
-              {serviceFee > 0 && (
-                <div className="flex items-center justify-between">
-                  <span>Tasa de servicio</span>
-                  <span>S/. {serviceFee.toFixed(2)}</span>
-                </div>
-              )}
-              {taxAmount > 0 && (
-                <div className="flex items-center justify-between">
-                  <span>IVA</span>
-                  <span>S/. {taxAmount.toFixed(2)}</span>
-                </div>
-              )}
             </div>
             {isSeatFlow && (
               <p className="mt-2 text-sm leading-relaxed text-slate-200">
@@ -533,14 +576,32 @@ function PaymentModal({
           <div className="mb-6 rounded-2xl border border-slate-700 bg-slate-950/70 p-4">
             <div className="mb-4 flex items-center justify-between gap-3">
               <div>
-                <p className="text-sm font-black text-white">Pago seguro Filmate</p>
-                <p className="mt-1 text-xs font-semibold text-slate-400">Validacion inspirada en checkout digital.</p>
+                <p className="text-sm font-black text-white">Pago seguro</p>
+                <p className="mt-1 text-xs font-semibold text-slate-400">Completa tu compra con un método de pago confiable.</p>
               </div>
               <div className="flex items-center gap-1 rounded-full border border-emerald-400/30 bg-emerald-400/10 px-3 py-1 text-xs font-bold text-emerald-200">
                 <ShieldCheck className="h-3.5 w-3.5" />
-                SSL
+                SEGURA
               </div>
             </div>
+
+            {hasDemoCredentials && (
+              <div className="mb-4 flex flex-col gap-3 rounded-xl border border-amber-400/30 bg-amber-400/10 p-3 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <p className="text-sm font-black text-amber-100">Pasarela de demostración</p>
+                  <p className="mt-1 text-xs font-semibold leading-relaxed text-amber-100/70">
+                    Usa credenciales aprobadas del backend sin ingresar datos reales.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={applyDemoCredentials}
+                  className="shrink-0 rounded-lg border border-amber-300/40 bg-amber-300/10 px-3 py-2 text-sm font-black text-amber-100 transition-colors hover:bg-amber-300/20"
+                >
+                  Usar datos de prueba
+                </button>
+              </div>
+            )}
 
             {selectedPaymentMethod === 'tarjeta' ? (
               <div className="space-y-3">
@@ -590,6 +651,7 @@ function PaymentModal({
                       onChange={(event) => setCardForm((current) => ({ ...current, cvv: onlyDigits(event.target.value).slice(0, 4) }))}
                       inputMode="numeric"
                       autoComplete="cc-csc"
+                      type="password"
                       placeholder="123"
                       className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm font-semibold text-white outline-none placeholder:text-white/30 focus:border-sky-400"
                     />
@@ -686,8 +748,6 @@ function PaymentModal({
 PaymentModal.propTypes = {
   paymentTotal: PropTypes.number.isRequired,
   paymentSubtotal: PropTypes.number.isRequired,
-  serviceFee: PropTypes.number.isRequired,
-  taxAmount: PropTypes.number.isRequired,
   isSeatFlow: PropTypes.bool.isRequired,
   seatsCount: PropTypes.number.isRequired,
   reservationTotal: PropTypes.number.isRequired,
@@ -697,6 +757,11 @@ PaymentModal.propTypes = {
   selectedPaymentMethod: PropTypes.string.isRequired,
   selectedPayment: PropTypes.shape({
     label: PropTypes.string,
+  }),
+  paymentTestMethods: PropTypes.shape({
+    tarjetas: PropTypes.arrayOf(PropTypes.object),
+    yape: PropTypes.arrayOf(PropTypes.object),
+    yape_otp_valido: PropTypes.string,
   }),
   isProcessingPayment: PropTypes.bool.isRequired,
   onSelectPaymentMethod: PropTypes.func.isRequired,
@@ -888,6 +953,7 @@ export const Dulceria = () => {
   const [skipSnacksForReservation, setSkipSnacksForReservation] = useState(false);
   const [lastAddedId, setLastAddedId] = useState(null);
   const [selectedPaymentMethod, setSelectedPaymentMethod] = useState('tarjeta');
+  const [paymentTestMethods, setPaymentTestMethods] = useState(null);
   const [pendingExitAction, setPendingExitAction] = useState(null);
   const [pedidoNumber] = useState(() => {
     try {
@@ -912,12 +978,11 @@ export const Dulceria = () => {
     bebidas: { atStart: true, atEnd: false },
     dulces: { atStart: true, atEnd: false },
   });
-  const [systemConfig, setSystemConfig] = useState({ tasaServicio: 0, ivaPorcentaje: 0 });
   const ticketRef = useRef(null);
   const sectionElementsRef = useRef({});
   const navigate = useNavigate();
   const location = useLocation();
-  const bookingContext = location.state || null;
+  const [bookingContext, setBookingContext] = useState(() => location.state || readStoredBookingContext());
   const isSeatFlow = Boolean(bookingContext?.pelicula);
   const authSession = getAuthSession();
   const pageTitle = isSeatFlow ? 'Completa tu compra' : 'Elige tus snacks favoritos';
@@ -932,9 +997,7 @@ export const Dulceria = () => {
   const total = snacksTotal + reservationTotal;
   const paymentSnackTotal = isSeatFlow && skipSnacksForReservation ? 0 : snacksTotal;
   const paymentSubtotal = isSeatFlow ? reservationTotal + paymentSnackTotal : snacksTotal;
-  const serviceFee = paymentSubtotal * (Number(systemConfig.tasaServicio || 0) / 100);
-  const taxAmount = (paymentSubtotal + serviceFee) * (Number(systemConfig.ivaPorcentaje || 0) / 100);
-  const paymentTotal = paymentSubtotal + serviceFee + taxAmount;
+  const paymentTotal = paymentSubtotal;
   const transactionId = checkoutResult?.id_transaccion || checkoutResult?.transaccion?.id_transaccion;
   const receiptCart = isSeatFlow && skipSnacksForReservation ? [] : carrito;
   const receiptTotal = Number(checkoutResult?.monto_total ?? checkoutResult?.transaccion?.monto_total ?? paymentTotal);
@@ -1006,18 +1069,30 @@ export const Dulceria = () => {
   }, [carrito, pedidoNumber, fechaCompra]);
 
   useEffect(() => {
-    let isMounted = true;
+    try {
+      if (bookingContext) {
+        sessionStorage.setItem(BOOKING_CONTEXT_KEY, JSON.stringify(bookingContext));
+      } else {
+        sessionStorage.removeItem(BOOKING_CONTEXT_KEY);
+      }
+    } catch {
+      // La reserva sigue disponible en memoria si sessionStorage no está habilitado.
+    }
+  }, [bookingContext]);
 
-    getSystemConfig()
-      .then((config) => {
-        if (isMounted) setSystemConfig(config);
+  useEffect(() => {
+    let active = true;
+
+    getPaymentTestMethods()
+      .then((methods) => {
+        if (active) setPaymentTestMethods(methods);
       })
       .catch(() => {
-        if (isMounted) setSystemConfig({ tasaServicio: 0, ivaPorcentaje: 0 });
+        if (active) setPaymentTestMethods(null);
       });
 
     return () => {
-      isMounted = false;
+      active = false;
     };
   }, []);
 
@@ -1073,6 +1148,11 @@ export const Dulceria = () => {
   }, []);
 
   const agregarProducto = (producto) => {
+    if (Number(producto.stock || 0) <= 0) {
+      openNotice('Producto agotado', `${producto.nombre} no tiene stock disponible.`);
+      return;
+    }
+
     setLastAddedId(producto.id);
     globalThis.window.setTimeout(() => setLastAddedId((current) => (current === producto.id ? null : current)), 700);
 
@@ -1081,7 +1161,9 @@ export const Dulceria = () => {
 
       if (existe) {
         return prev.map((item) =>
-          item.id === producto.id ? { ...item, cantidad: item.cantidad + 1 } : item
+          item.id === producto.id
+            ? { ...item, cantidad: Math.min(item.cantidad + 1, Number(producto.stock)) }
+            : item
         );
       }
 
@@ -1093,7 +1175,11 @@ export const Dulceria = () => {
     setCarrito((prev) =>
       cantidad <= 0
         ? prev.filter((item) => item.id !== id)
-        : prev.map((item) => (item.id === id ? { ...item, cantidad } : item))
+        : prev.map((item) => (
+            item.id === id
+              ? { ...item, cantidad: Math.min(cantidad, Number(item.stock || cantidad)) }
+              : item
+          ))
     );
   };
 
@@ -1216,9 +1302,11 @@ export const Dulceria = () => {
     setPendingExitAction(null);
     setNotice(null);
     setCarrito([]);
+    setBookingContext(null);
     try {
       sessionStorage.removeItem('filmate-dulceria-pedido');
       sessionStorage.removeItem('filmate-dulceria-fecha');
+      sessionStorage.removeItem(BOOKING_CONTEXT_KEY);
     } catch {
       // no-op
     }
@@ -1226,135 +1314,187 @@ export const Dulceria = () => {
   };
 
   const descargarPDF = async () => {
-    if (!ticketRef.current || isGeneratingPDF) return;
+    if (!transactionId || isGeneratingPDF) return;
 
     setIsGeneratingPDF(true);
 
     try {
-      const pdf = new jsPDF({
-        orientation: 'portrait',
-        unit: 'mm',
-        format: 'a4',
-      });
-
-      const pageWidth = pdf.internal.pageSize.getWidth();
-      const marginX = 14;
-      let y = 14;
-
-      pdf.setFillColor(2, 6, 23);
-      pdf.rect(0, 0, pageWidth, pdf.internal.pageSize.getHeight(), 'F');
-
-      pdf.setFillColor(15, 23, 42);
-      pdf.roundedRect(marginX, y, pageWidth - marginX * 2, 22, 4, 4, 'F');
-      pdf.setTextColor(255, 255, 255);
-      pdf.setFont('helvetica', 'bold');
-      pdf.setFontSize(18);
-      pdf.text('Filmate', marginX + 8, y + 9);
-      pdf.setFontSize(12);
-      pdf.setFont('helvetica', 'normal');
-      pdf.text('Ticket de compra', marginX + 8, y + 16);
-
-      y += 30;
-
-      if (bookingContext) {
-        pdf.setFillColor(15, 23, 42);
-        pdf.roundedRect(marginX, y, pageWidth - marginX * 2, 30, 4, 4, 'F');
-        pdf.setTextColor(255, 255, 255);
-        pdf.setFont('helvetica', 'bold');
-        pdf.setFontSize(11);
-        pdf.text('Reserva de película', marginX + 8, y + 8);
-        pdf.setFont('helvetica', 'normal');
-        pdf.text(String(bookingContext.pelicula || 'Película'), marginX + 8, y + 15);
-        pdf.text(`${bookingContext.sede || ''} · ${bookingContext.horario || ''} · ${bookingContext.sala || ''}`, marginX + 8, y + 22);
-        const seatsText = `Asientos: ${(bookingContext.asientos && bookingContext.asientos.length) ? bookingContext.asientos.join(', ') : 'Sin asientos seleccionados'}`;
-        pdf.text(seatsText, marginX + 8, y + 28);
-        y += 36;
-      }
-      pdf.setFillColor(15, 23, 42);
-      pdf.roundedRect(marginX, y, pageWidth - marginX * 2, 24, 4, 4, 'F');
-      pdf.setTextColor(255, 255, 255);
-      pdf.setFont('helvetica', 'bold');
-      pdf.setFontSize(12);
-      pdf.text(`Pedido: ${pedidoNumber}`, marginX + 8, y + 9);
-      pdf.setFont('helvetica', 'normal');
-      pdf.text(`Fecha: ${fechaCompra.toLocaleString('es-PE')}`, marginX + 8, y + 16);
-
-      y += 32;
-      pdf.setFillColor(15, 23, 42);
-      pdf.roundedRect(marginX, y, pageWidth - marginX * 2, 12 + receiptCart.length * 10, 4, 4, 'F');
-      pdf.setFont('helvetica', 'bold');
-      pdf.setFontSize(11);
-      pdf.text('Detalle del pedido', marginX + 8, y + 8);
-
-      let lineY = y + 16;
-      pdf.setFont('helvetica', 'normal');
-      receiptCart.forEach((item) => {
-        pdf.text(`${item.cantidad} x ${item.nombre}`, marginX + 8, lineY);
-        const amount = `S/. ${(item.precio * item.cantidad).toFixed(2)}`;
-        pdf.text(amount, pageWidth - marginX - pdf.getTextWidth(amount), lineY);
-        lineY += 8;
-      });
-
-      y = lineY + 6;
-      pdf.setFillColor(30, 64, 175);
-      pdf.roundedRect(marginX, y, pageWidth - marginX * 2, 16, 4, 4, 'F');
-      pdf.setTextColor(255, 255, 255);
-      pdf.setFont('helvetica', 'bold');
-      pdf.setFontSize(13);
-      pdf.text('Total a pagar', marginX + 8, y + 10);
-      pdf.text(`S/. ${receiptTotal.toFixed(2)}`, pageWidth - marginX - pdf.getTextWidth(`S/. ${receiptTotal.toFixed(2)}`) - 8, y + 10);
-
-      y += 24;
-      const qrCanvas = ticketRef.current.querySelector('canvas');
-      if (qrCanvas) {
-        const qrDataUrl = qrCanvas.toDataURL('image/png');
-        pdf.setFillColor(255, 255, 255);
-        pdf.roundedRect(marginX + 28, y, 70, 70, 4, 4, 'F');
-        pdf.addImage(qrDataUrl, 'PNG', marginX + 33, y + 5, 60, 60);
-        y += 78;
-      }
-
-      pdf.setTextColor(148, 163, 184);
-      pdf.setFont('helvetica', 'normal');
-      pdf.setFontSize(10);
-      pdf.text('Presenta este QR en el mostrador para recoger tu pedido.', marginX, y);
-      if (bookingContext) {
-        y += 8;
-        pdf.text('Incluye tu reserva y tus asientos al presentar el ticket.', marginX, y);
-      }
-
-      const blob = pdf.output('blob');
+      const blob = await downloadTicketPdf(transactionId);
       const url = URL.createObjectURL(blob);
       const anchor = document.createElement('a');
       anchor.href = url;
-      anchor.download = `ticket-${pedidoNumber}.pdf`;
+      anchor.download = `ticket-transaccion-${transactionId}.pdf`;
       document.body.appendChild(anchor);
       anchor.click();
       anchor.remove();
-
-      globalThis.window.setTimeout(() => {
-        URL.revokeObjectURL(url);
-        limpiarYSalir();
-        setIsGeneratingPDF(false);
-      }, 800);
+      globalThis.window.setTimeout(() => URL.revokeObjectURL(url), 1_000);
+      limpiarYSalir();
     } catch (error) {
-      console.error('No se pudo generar el PDF', error);
+      openNotice('Error al descargar el PDF', error?.message || 'No se pudo descargar el ticket. Intenta de nuevo.');
+    } finally {
       setIsGeneratingPDF(false);
-      openNotice('Error al generar el PDF', 'No se pudo generar el ticket PDF. Intenta de nuevo.');
     }
   };
 
-  const iniciarPago = () => {
-    setCheckoutError('');
-    setSkipSnacksForReservation(false);
-    setCheckoutView(checkoutViews.payment);
+  const refreshCommercialData = async ({ includeSnacks = true } = {}) => {
+    let pricesChanged = false;
+    let stockAdjusted = false;
+
+    if (isSeatFlow) {
+      if (!bookingContext?.fecha_funcion || !bookingContext?.id_funcion) {
+        throw new Error('No se pudo validar la fecha y función seleccionadas. Vuelve a elegir tus asientos.');
+      }
+
+      const [showtimes, seatMap, cinemas, rooms] = await Promise.all([
+        getShowtimesByDate(bookingContext.fecha_funcion, {
+          movieId: bookingContext.movieId,
+          forceRefresh: true,
+        }),
+        getSeatMap(bookingContext.id_funcion),
+        getCinemas(),
+        getRooms(),
+      ]);
+      const currentShowtime = showtimes.find(
+        (showtime) => String(showtime.id_funcion) === String(bookingContext.id_funcion)
+      );
+
+      if (!currentShowtime) {
+        throw new Error('La función seleccionada ya no está disponible. Vuelve a la cartelera.');
+      }
+
+      const currentRoom = rooms.find(
+        (room) => String(room.id) === String(currentShowtime.id_sala)
+      );
+      const currentCinema = cinemas.find(
+        (cinema) => String(cinema.id) === String(currentShowtime.id_cine ?? currentRoom?.id_cine)
+      );
+      const roomStatus = String(currentRoom?.estado_sala || currentRoom?.estado || '').trim().toLowerCase();
+      const cinemaStatus = String(currentCinema?.estado || '').trim().toLowerCase();
+      const activeStatuses = new Set(['activo', 'activa', 'active']);
+
+      if (!currentRoom || (roomStatus && !activeStatuses.has(roomStatus))) {
+        throw new Error('La sala seleccionada ya no está activa. Elige otra función.');
+      }
+      if (!currentCinema || (cinemaStatus && !activeStatuses.has(cinemaStatus))) {
+        throw new Error('El cine seleccionado ya no está activo. Elige otra sede.');
+      }
+
+      const selectedSeatIds = new Set((bookingContext.seatIds || []).map(String));
+      const unavailableSeat = (seatMap?.asientos || []).find(
+        (seat) => selectedSeatIds.has(String(seat.id_asiento)) && seat.estado !== 'Disponible'
+      );
+      if (unavailableSeat) {
+        throw new Error(`El asiento ${unavailableSeat.fila}${unavailableSeat.columna} ya no está disponible.`);
+      }
+
+      const latestSeatPrice = Number(currentShowtime.precio_base || 0);
+      if (Math.abs(latestSeatPrice - seatPrice) > 0.001) {
+        pricesChanged = true;
+        setBookingContext((current) => ({ ...current, precio_base: latestSeatPrice }));
+      }
+    }
+
+    if (includeSnacks && carrito.length > 0) {
+      const cartPayload = carrito.map((item) => ({ id_producto: item.id, cantidad: item.cantidad }));
+      const [{ categories, products }, calculatedCart] = await Promise.all([
+        getSnackProducts(),
+        calculateSnackCart(cartPayload),
+      ]);
+      const productsById = new Map(products.map((product) => [String(product.id), product]));
+      const refreshedCart = [];
+
+      carrito.forEach((item) => {
+        const latestProduct = productsById.get(String(item.id));
+        if (!latestProduct || Number(latestProduct.stock || 0) <= 0) {
+          stockAdjusted = true;
+          return;
+        }
+
+        const availableStock = Number(latestProduct.stock);
+        const nextQuantity = Math.min(item.cantidad, availableStock);
+        if (nextQuantity !== item.cantidad) stockAdjusted = true;
+        if (Math.abs(Number(latestProduct.precio) - Number(item.precio)) > 0.001) pricesChanged = true;
+        refreshedCart.push({ ...latestProduct, cantidad: nextQuantity });
+      });
+
+      const nextLabels = { ...categoryLabels };
+      categories.forEach((category) => {
+        nextLabels[category.key] = category.label;
+      });
+      const nextProducts = products.reduce((acc, product) => {
+        const key = product.categoryKey || 'dulces';
+        if (!acc[key]) acc[key] = [];
+        acc[key].push(product);
+        return acc;
+      }, {});
+
+      const refreshedSubtotal = refreshedCart.reduce(
+        (sum, item) => sum + (item.precio * item.cantidad),
+        0
+      );
+      if (Math.abs(Number(calculatedCart?.subtotal || 0) - snacksTotal) > 0.001) {
+        pricesChanged = true;
+      }
+      if (Math.abs(refreshedSubtotal - Number(calculatedCart?.subtotal || 0)) > 0.001) {
+        stockAdjusted = true;
+      }
+
+      setCarrito(refreshedCart);
+      setProductosPorCategoria(nextProducts);
+      setLabelsPorCategoria(nextLabels);
+    }
+
+    return { pricesChanged, stockAdjusted };
   };
 
-  const omitirSnacks = () => {
-    setCheckoutError('');
-    setSkipSnacksForReservation(true);
-    setCheckoutView(checkoutViews.payment);
+  const iniciarPago = async ({ omitSnacks = false } = {}) => {
+    if (isProcessingPayment) return;
+
+    if (!isSeatFlow) {
+      try {
+        setCheckoutError('');
+        setIsProcessingPayment(true);
+        setSkipSnacksForReservation(omitSnacks);
+        setCheckoutView(checkoutViews.payment);
+      } catch (error) {
+        setCheckoutError(error?.message || 'No se pudo validar el pedido.');
+      } finally {
+        setIsProcessingPayment(false);
+      }
+      return;
+    }
+
+    const userId = authSession?.user?.id_usuario || authSession?.user?.id || authSession?.user?.user_id;
+    if (!userId) {
+      openNotice('Inicia sesión', 'Debes iniciar sesión para completar una reserva.');
+      return;
+    }
+
+    try {
+      setCheckoutError('');
+      setIsProcessingPayment(true);
+      setSkipSnacksForReservation(omitSnacks);
+      const result = await refreshCommercialData({ includeSnacks: !omitSnacks });
+
+      if (result.pricesChanged || result.stockAdjusted) {
+        openNotice(
+          'Pedido actualizado',
+          'Los precios o la disponibilidad cambiaron. Revisa nuevamente el resumen antes de pagar.'
+        );
+        setCheckoutView(checkoutViews.verification);
+        return;
+      }
+
+      setCheckoutView(checkoutViews.payment);
+    } catch (error) {
+      setCheckoutError(error?.message || 'No se pudo validar el pedido.');
+      openNotice('No se pudo validar el pedido', error?.message || 'Intenta nuevamente.');
+    } finally {
+      setIsProcessingPayment(false);
+    }
   };
+
+  const omitirSnacks = () => iniciarPago({ omitSnacks: true });
 
   const confirmarPago = async (paymentData = {}) => {
     if (isProcessingPayment) return;
@@ -1378,16 +1518,33 @@ export const Dulceria = () => {
         setCheckoutError('');
         setIsProcessingPayment(true);
 
+        const validationResult = await refreshCommercialData({ includeSnacks: !skipSnacksForReservation });
+        if (validationResult.pricesChanged || validationResult.stockAdjusted) {
+          setCheckoutView(checkoutViews.verification);
+          openNotice(
+            'Pedido actualizado',
+            'Los precios o la disponibilidad cambiaron antes del cobro. Confirma nuevamente el resumen.'
+          );
+          return;
+        }
+
+        const email = authSession?.user?.correo || authSession?.user?.correo_electronico;
+        if (!email) {
+          throw new Error('Tu cuenta no tiene un correo válido para procesar el pago.');
+        }
+
+        const tokenizedPayment = paymentData.paymentKind === 'tarjeta'
+          ? await tokenizeCardPayment(paymentData.tokenizationPayload || {})
+          : await tokenizeYapePayment(paymentData.tokenizationPayload || {});
+
         const response = await checkoutOrder({
           id_usuario: userId,
           id_funcion: bookingContext.id_funcion,
           ids_asientos: seatIds,
           metodo_pago: paymentData.metodo_pago || selectedPaymentMethod,
-          monto_boletos: reservationTotal,
           monto_confiteria: paymentSnackTotal,
-          monto_subtotal: paymentSubtotal,
-          tasa_servicio: serviceFee,
-          iva_monto: taxAmount,
+          token_pago: tokenizedPayment.token,
+          email,
           snacks: (skipSnacksForReservation ? [] : carrito).map((item) => ({
             id_producto: item.id,
             cantidad: item.cantidad,
@@ -1396,6 +1553,11 @@ export const Dulceria = () => {
 
         setCheckoutResult(response);
         recordPurchase(response, paymentData);
+        try {
+          sessionStorage.removeItem(BOOKING_CONTEXT_KEY);
+        } catch {
+          // El comprobante continúa disponible en memoria aunque falle el almacenamiento.
+        }
         const currentHistoryState = globalThis.window.history.state;
         const nextHistoryState = currentHistoryState
           ? { ...currentHistoryState, usr: getClearedBookingContext(bookingContext) }
@@ -1414,39 +1576,36 @@ export const Dulceria = () => {
       return;
     }
 
-    if (!userId) {
-      setCheckoutError('Debes iniciar sesiÃ³n para completar la compra.');
-      return;
-    }
-
-    if (carrito.length === 0) {
-      setCheckoutError('Agrega al menos un producto para completar la compra.');
-      return;
-    }
-
     try {
       setCheckoutError('');
       setIsProcessingPayment(true);
 
-      const response = await checkoutOrder({
-        id_usuario: userId,
-        metodo_pago: paymentData.metodo_pago || selectedPaymentMethod,
-        monto_boletos: 0,
-        monto_confiteria: paymentSnackTotal,
-        monto_subtotal: paymentSubtotal,
-        tasa_servicio: serviceFee,
-        iva_monto: taxAmount,
-        snacks: carrito.map((item) => ({
-          id_producto: item.id,
-          cantidad: item.cantidad,
-        })),
+      const paymentMethodLabel = paymentData.metodo_pago || selectedPayment?.label || selectedPaymentMethod;
+      const tokenizedPayment = paymentData.paymentKind === 'tarjeta'
+        ? await tokenizeCardPayment(paymentData.tokenizationPayload || {})
+        : await tokenizeYapePayment(paymentData.tokenizationPayload || {});
+
+      const localCheckout = buildLocalSnackOnlyCheckout({
+        pedidoNumber,
+        total: paymentTotal,
+        carrito,
+        paymentMethod: paymentMethodLabel,
       });
 
-      setCheckoutResult(response);
-      recordPurchase(response, paymentData);
+      setCheckoutResult({
+        ...localCheckout,
+        token_pago: tokenizedPayment.token,
+      });
+      recordPurchase({
+        ...localCheckout,
+        token_pago: tokenizedPayment.token,
+      }, {
+        ...paymentData,
+        metodo_pago: paymentMethodLabel,
+      });
       setCheckoutView(checkoutViews.success);
-    } catch (err) {
-      setCheckoutError(err?.message || 'No se pudo completar la compra.');
+    } catch (error) {
+      setCheckoutError(error?.message || 'No se pudo completar la compra.');
     } finally {
       setIsProcessingPayment(false);
     }
@@ -1521,6 +1680,7 @@ export const Dulceria = () => {
         >
           {productos.map((producto) => {
             const imageSrc = imageFallbacks[producto.id] || producto.imagen;
+            const isOutOfStock = Number(producto.stock || 0) <= 0;
 
             return (
               <article
@@ -1559,11 +1719,15 @@ export const Dulceria = () => {
                 <div className="p-4">
                   <h4 className="mb-2 text-sm font-semibold text-white sm:text-base">{producto.nombre}</h4>
                   <p className="mb-3 text-lg font-bold text-blue-400">S/. {producto.precio.toFixed(2)}</p>
+                  <p className={`mb-3 text-xs font-semibold ${isOutOfStock ? 'text-red-300' : 'text-slate-400'}`}>
+                    {isOutOfStock ? 'Agotado' : `${producto.stock} disponibles`}
+                  </p>
                   <button
                     onClick={() => agregarProducto(producto)}
-                    className="w-full rounded-lg bg-blue-600 py-2 text-sm font-semibold text-white transition-all hover:bg-blue-700 active:scale-95"
+                    disabled={isOutOfStock}
+                    className="w-full rounded-lg bg-blue-600 py-2 text-sm font-semibold text-white transition-all hover:bg-blue-700 active:scale-95 disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-400"
                   >
-                    Agregar
+                    {isOutOfStock ? 'Sin stock' : 'Agregar'}
                   </button>
                 </div>
               </article>
@@ -1602,6 +1766,15 @@ export const Dulceria = () => {
               {pageSubtitle}
             </p>
           </div>
+
+          {!isSeatFlow && (
+            <div className="mb-8 rounded-2xl border border-emerald-400/40 bg-emerald-400/10 px-5 py-4 text-emerald-100">
+              <p className="font-bold">Compra de dulcería lista para finalizar.</p>
+              <p className="mt-1 text-sm text-emerald-100/80">
+                Puedes pagar directamente tu pedido de snacks sin necesidad de una entrada o reserva previa.
+              </p>
+            </div>
+          )}
 
           {snacksError && (
             <div className="mb-8 rounded-2xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-amber-100">
@@ -1687,7 +1860,8 @@ export const Dulceria = () => {
                           <span className="w-8 text-center font-semibold text-white">{item.cantidad}</span>
                           <button
                             onClick={() => actualizarCantidad(item.id, item.cantidad + 1)}
-                            className="flex h-8 w-8 items-center justify-center rounded-full bg-yellow-400 font-bold text-black transition-colors hover:bg-yellow-500"
+                            disabled={Number.isFinite(item.stock) && item.cantidad >= item.stock}
+                            className="flex h-8 w-8 items-center justify-center rounded-full bg-yellow-400 font-bold text-black transition-colors hover:bg-yellow-500 disabled:cursor-not-allowed disabled:opacity-40"
                           >
                             <Plus className="h-4 w-4" />
                           </button>
@@ -1725,10 +1899,16 @@ export const Dulceria = () => {
                       </button>
                     )}
                     <button
-                      onClick={() => setCheckoutView(checkoutViews.verification)}
+                      onClick={() => {
+                        if (isSeatFlow) {
+                          setCheckoutView(checkoutViews.verification);
+                        } else {
+                          setCheckoutView(checkoutViews.verification);
+                        }
+                      }}
                       className="w-full rounded-lg bg-green-600 py-3 font-semibold text-white transition-colors hover:bg-green-700"
                     >
-                      Confirmar pedido
+                      {isSeatFlow ? 'Confirmar pedido' : 'Pagar dulcería'}
                     </button>
                   </div>
                 </>
@@ -1755,8 +1935,6 @@ export const Dulceria = () => {
         <PaymentModal
           paymentTotal={paymentTotal}
           paymentSubtotal={paymentSubtotal}
-          serviceFee={serviceFee}
-          taxAmount={taxAmount}
           isSeatFlow={isSeatFlow}
           seatsCount={seatsCount}
           reservationTotal={reservationTotal}
@@ -1765,6 +1943,7 @@ export const Dulceria = () => {
           bookingContext={bookingContext}
           selectedPaymentMethod={selectedPaymentMethod}
           selectedPayment={selectedPayment}
+          paymentTestMethods={paymentTestMethods}
           isProcessingPayment={isProcessingPayment}
           onSelectPaymentMethod={setSelectedPaymentMethod}
           onRequestExit={requestExit}

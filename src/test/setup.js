@@ -7,4 +7,5 @@ afterEach(() => {
   vi.clearAllMocks();
   vi.restoreAllMocks();
   localStorage.clear();
+  sessionStorage.clear();
 });

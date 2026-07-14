@@ -25,24 +25,24 @@ const socialItems = [
 
 export const Footer = () => {
   return (
-    <footer className="border-t border-slate-800 bg-slate-950 px-4 py-10 sm:px-6 lg:px-8">
+    <footer className="border-t border-slate-800 bg-slate-950 px-4 pb-[max(2rem,env(safe-area-inset-bottom))] pt-8 sm:px-6 sm:py-10 lg:px-8">
       <div className="mx-auto max-w-7xl">
-        <div className="grid gap-10 lg:grid-cols-3">
+        <div className="grid gap-7 sm:gap-10 lg:grid-cols-3">
           {footerGroups.map((group) => (
             <div key={group.title}>
-              <h3 className="mb-5 text-3xl font-black uppercase tracking-wide text-white">
+              <h3 className="mb-3 text-xl font-black uppercase tracking-wide text-white sm:mb-5 sm:text-2xl lg:text-3xl">
                 {group.title}
               </h3>
 
-              <div className="space-y-4">
+              <div className="space-y-1 sm:space-y-3">
                 {group.items.map((item) => (
                   <button
                     key={item}
                     type="button"
-                    className="flex items-center gap-2 text-left text-2xl font-semibold text-slate-100 transition-colors hover:text-blue-300"
+                    className="flex items-center gap-2 text-left text-base font-semibold text-slate-100 transition-colors hover:text-blue-300 sm:text-lg lg:text-2xl"
                   >
                     {item === 'Libro de reclamaciones' ? (
-                      <BookOpen className="h-7 w-7 text-blue-300" />
+                      <BookOpen className="h-5 w-5 text-blue-300 sm:h-6 sm:w-6" />
                     ) : (
                       <ChevronRight className="h-5 w-5 text-slate-500" />
                     )}
@@ -54,14 +54,14 @@ export const Footer = () => {
           ))}
         </div>
 
-        <div className="mt-12 flex flex-col gap-8 border-t border-slate-800 pt-8 lg:flex-row lg:items-end lg:justify-between">
+        <div className="mt-8 flex flex-col gap-6 border-t border-slate-800 pt-6 sm:mt-12 sm:gap-8 sm:pt-8 lg:flex-row lg:items-end lg:justify-between">
           <div className="space-y-1 text-slate-100">
-            <p className="text-lg font-bold">Filmate S.A. | RUC 20429683581</p>
-            <p className="text-lg font-bold">Todos los derechos reservados 2025</p>
+            <p className="text-sm font-bold sm:text-base lg:text-lg">Filmate S.A. | RUC 20429683581</p>
+            <p className="text-sm font-bold sm:text-base lg:text-lg">Todos los derechos reservados 2025</p>
           </div>
 
           <div className="flex flex-col gap-4 lg:items-end">
-            <p className="text-2xl font-bold text-white">Síguenos en:</p>
+            <p className="text-lg font-bold text-white sm:text-xl lg:text-2xl">Síguenos en:</p>
             <div className="flex flex-wrap items-center gap-4">
               {socialItems.map((social) => {
                 const Icon = social.icon;
@@ -71,7 +71,7 @@ export const Footer = () => {
                     key={social.label}
                     type="button"
                     aria-label={social.label}
-                    className={`flex h-14 w-14 items-center justify-center rounded-full border border-slate-700 bg-gradient-to-br ${social.color} text-white shadow-lg shadow-black/30 transition-transform hover:scale-105`}
+                    className={`flex h-12 w-12 items-center justify-center rounded-full border border-slate-700 bg-gradient-to-br ${social.color} text-white shadow-lg shadow-black/30 transition-transform hover:scale-105 sm:h-14 sm:w-14`}
                   >
                     {Icon ? (
                       <Icon className="h-7 w-7" />

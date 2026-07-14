@@ -4,18 +4,24 @@ import Header from './Header.jsx';
 import { ChevronDown, Eye, Film, Heart, MessageSquareText, PencilLine, Plus, Search, ThumbsUp, Trash2, UserCheck, UserPlus, X } from 'lucide-react';
 import { getAuthSession } from './authSession';
 import {
-  API_BASE_URL,
+  addMovieToCollection,
+  createCollection,
+  deleteCollection,
   followUser,
+  getCollectionMovies,
   getFollowers,
   getFollowing,
   getFollowingReviews,
   getMovieById,
+  getMovies,
   getSocialSummary,
+  getUserCollections,
   getUserInteractions,
   getUserProfile,
   getUserRatedMovies,
   getUserRatingDistribution,
   getUserReviews,
+  removeMovieFromCollection,
   searchMovies,
   searchUsers,
   unfollowUser,
@@ -139,18 +145,13 @@ const getInteractionMovies = async (userId, predicate) => {
   return movies.filter(Boolean);
 };
 
-const fetchJson = async (url) => {
-  const response = await fetch(url);
-  return response.json();
-};
-
 const loadCollectionsWithPreviews = async (userId) => {
-  const data = await fetchJson(`${API_BASE_URL}/client/colecciones/usuario/${userId}`);
+  const data = await getUserCollections(userId);
   const collections = Array.isArray(data) ? data : [];
   const movieEntries = await Promise.all(
     collections.map(async (collection) => {
       try {
-        const movies = await fetchJson(`${API_BASE_URL}/client/colecciones/${collection.id_coleccion}/peliculas`);
+        const movies = await getCollectionMovies(collection.id_coleccion);
         return [collection.id_coleccion, Array.isArray(movies) ? movies : []];
       } catch {
         return [collection.id_coleccion, []];
@@ -161,34 +162,6 @@ const loadCollectionsWithPreviews = async (userId) => {
   return {
     collections,
     moviesByCollection: Object.fromEntries(movieEntries),
-  };
-};
-
-const loadReviewsWithMovies = async (userId) => {
-  const [reviewsData, interactions] = await Promise.all([
-    fetchJson(`${API_BASE_URL}/client/reviews/user/${userId}`),
-    getUserInteractions(userId),
-  ]);
-  const interactionsMap = Object.fromEntries(interactions.map((item) => [item.id_pelicula, item]));
-  const reviews = Array.isArray(reviewsData) ? reviewsData : [];
-  const movieIds = [...new Set(reviews.map((review) => review.id_pelicula).filter(Boolean))];
-  const moviesData = await Promise.all(
-    movieIds.map((id) =>
-      fetchJson(`${API_BASE_URL}/client/movies/${id}`).catch(() => null)
-    )
-  );
-  const moviesById = Object.fromEntries(
-    moviesData
-      .filter((movie) => movie?.id_pelicula)
-      .map((movie) => [movie.id_pelicula, movie])
-  );
-
-  return {
-    interactionsMap,
-    reviews: reviews.map((review) => ({
-      ...review,
-      pelicula: moviesById[review.id_pelicula] || null,
-    })),
   };
 };
 
@@ -483,13 +456,23 @@ export const Social = () => {
     }, 0);
 
     const reviewsRequest = reviewsScope === 'following'
-      ? getFollowingReviews(viewedUserId)
-      : getUserReviews(viewedUserId);
+      ? getFollowingReviews(viewedUserId).then((reviews) => [reviews, []])
+      : Promise.allSettled([getUserReviews(viewedUserId), getUserInteractions(viewedUserId)])
+          .then(([reviewsResult, interactionsResult]) => {
+            if (reviewsResult.status === 'rejected') throw reviewsResult.reason;
+            return [
+              reviewsResult.value,
+              interactionsResult.status === 'fulfilled' ? interactionsResult.value : [],
+            ];
+          });
 
     reviewsRequest
-      .then((reviews) => {
+      .then(([reviews, interactions]) => {
         if (!active) return;
         setUserReviews(reviews);
+        setInteractionsMap(Object.fromEntries(
+          interactions.map((item) => [item.id_pelicula, item])
+        ));
       })
       .catch(() => {
         if (active) setUserReviews([]);
@@ -692,32 +675,6 @@ export const Social = () => {
   }, [activeTab, activityScope, shouldLoadSocial, viewedUserId]);
 
   useEffect(() => {
-    if (activeTab !== 'Favoritos' || !shouldLoadSocial || !viewedUserId) return;
-
-    let active = true;
-    const loadingTimer = globalThis.window.setTimeout(() => {
-      if (active) setFavoriteTabLoading(true);
-    }, 0);
-
-    getInteractionMovies(viewedUserId, (item) => item.favorita)
-      .then((movies) => {
-        if (!active) return;
-        setFavoriteTabMovies(movies);
-      })
-      .catch(() => {
-        if (active) setFavoriteTabMovies([]);
-      })
-      .finally(() => {
-        if (active) setFavoriteTabLoading(false);
-      });
-
-    return () => {
-      active = false;
-      globalThis.window.clearTimeout(loadingTimer);
-    };
-  }, [activeTab, shouldLoadSocial, viewedUserId]);
-
-  useEffect(() => {
     if (activeTab !== 'Listas' || !shouldLoadSocial || !viewedUserId) return;
 
     let active = true;
@@ -746,33 +703,6 @@ export const Social = () => {
     };
   }, [activeTab, shouldLoadSocial, viewedUserId]);
 
-  useEffect(() => {
-    if (activeTab !== 'Reseñas' || !shouldLoadSocial || !viewedUserId) return;
-
-    let active = true;
-    const loadingTimer = globalThis.window.setTimeout(() => {
-      if (active) setReviewsLoading(true);
-    }, 0);
-
-    loadReviewsWithMovies(viewedUserId)
-      .then(({ interactionsMap: nextInteractionsMap, reviews }) => {
-        if (!active) return;
-        setInteractionsMap(nextInteractionsMap);
-        setUserReviews(reviews);
-      })
-      .catch(() => {
-        if (active) setUserReviews([]);
-      })
-      .finally(() => {
-        if (active) setReviewsLoading(false);
-      });
-
-    return () => {
-      active = false;
-      globalThis.window.clearTimeout(loadingTimer);
-    };
-  }, [activeTab, shouldLoadSocial, viewedUserId]);
-
   const handleToggleCollection = (collectionId) => {
     if (expandedCollectionId === collectionId) {
       setExpandedCollectionId(null);
@@ -785,16 +715,16 @@ export const Social = () => {
 
     setCollectionMoviesLoading((prev) => ({ ...prev, [collectionId]: true }));
 
-    fetch(`${API_BASE_URL}/client/colecciones/${collectionId}/peliculas`)
-      .then((res) => res.json())
+    getCollectionMovies(collectionId)
       .then((data) => {
         setCollectionMovies((prev) => ({
           ...prev,
           [collectionId]: Array.isArray(data) ? data : [],
         }));
       })
-      .catch(() => {
+      .catch((error) => {
         setCollectionMovies((prev) => ({ ...prev, [collectionId]: [] }));
+        setLoadError(error?.message || 'No se pudo cargar la lista.');
       })
       .finally(() => {
         setCollectionMoviesLoading((prev) => ({ ...prev, [collectionId]: false }));
@@ -815,7 +745,9 @@ export const Social = () => {
         }));
         setShowUnfollowConfirm(false);
       })
-      .catch(() => {})
+      .catch((error) => {
+        setFollowError(error?.message || 'No se pudo dejar de seguir a este usuario.');
+      })
       .finally(() => {
         setUnfollowLoading(false);
       });
@@ -835,16 +767,11 @@ export const Social = () => {
     setCreatingList(true);
     setCreateListError('');
 
-    fetch(`${API_BASE_URL}/client/colecciones/`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
+    createCollection({
         id_usuario: Number(userId),
         titulo_coleccion: newListTitle.trim(),
         descripcion: newListDescription.trim() || null,
-      }),
     })
-      .then((res) => res.json())
       .then((newCollection) => {
         setCollections((prev) => [newCollection, ...prev]);
         setNewListTitle('');
@@ -861,7 +788,7 @@ export const Social = () => {
   };
 
   const handleDeleteCollection = (collectionId) => {
-    fetch(`${API_BASE_URL}/client/colecciones/${collectionId}`, { method: 'DELETE' })
+    deleteCollection(collectionId)
       .then(() => {
         setCollections((prev) => prev.filter((c) => c.id_coleccion !== collectionId));
         if (expandedCollectionId === collectionId) setExpandedCollectionId(null);
@@ -872,11 +799,13 @@ export const Social = () => {
         });
         setDeleteCollectionConfirm(null);
       })
-      .catch(() => {});
+      .catch((error) => {
+        setLoadError(error?.message || 'No se pudo eliminar la lista.');
+      });
   };
 
   const handleRemoveMovieFromCollection = (collectionId, movieId) => {
-    fetch(`${API_BASE_URL}/client/colecciones/${collectionId}/pelicula/${movieId}`, { method: 'DELETE' })
+    removeMovieFromCollection(collectionId, movieId)
       .then(() => {
         setCollectionMovies((prev) => ({
           ...prev,
@@ -884,7 +813,9 @@ export const Social = () => {
         }));
         setRemoveMovieConfirm(null);
       })
-      .catch(() => {});
+      .catch((error) => {
+        setLoadError(error?.message || 'No se pudo quitar la película de la lista.');
+      });
   };
 
   const handleOpenAddMovie = (collectionId) => {
@@ -894,10 +825,16 @@ export const Social = () => {
     if (allMovies.length > 0) return;
 
     setAllMoviesLoading(true);
-    fetch(`${API_BASE_URL}/client/movies/?limit=200`)
-      .then((res) => res.json())
-      .then((data) => setAllMovies(Array.isArray(data) ? data : []))
-      .catch(() => setAllMovies([]))
+    getMovies({ limit: 200 })
+      .then((data) => setAllMovies(data.map((movie) => ({
+        id_pelicula: movie.id,
+        titulo: movie.titulo,
+        url_poster: movie.imagenPoster,
+      }))))
+      .catch((error) => {
+        setAllMovies([]);
+        setLoadError(error?.message || 'No se pudo cargar el catálogo de películas.');
+      })
       .finally(() => setAllMoviesLoading(false));
   };
 
@@ -907,16 +844,15 @@ export const Social = () => {
 
     Promise.all(
       toAdd.map((movie) =>
-        fetch(`${API_BASE_URL}/client/colecciones/agregar-pelicula`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ id_coleccion: collectionId, id_pelicula: movie.id_pelicula }),
-        })
+        addMovieToCollection(collectionId, movie.id_pelicula)
           .then(() => ({ id_pelicula: movie.id_pelicula, titulo: movie.titulo, url_poster: movie.url_poster }))
           .catch(() => null)
       )
     ).then((results) => {
       const added = results.filter(Boolean);
+      if (added.length !== toAdd.length) {
+        setLoadError('Algunas películas no pudieron agregarse a la lista.');
+      }
       if (added.length > 0) {
         setCollectionMovies((prev) => ({
           ...prev,
@@ -968,7 +904,8 @@ export const Social = () => {
 
   const normalizedSearchQuery = query.trim().toLowerCase();
   const displayedUserSearchResults = normalizedSearchQuery
-    ? userSearchResults.filter((user) => String(user.username || '').toLowerCase().includes(normalizedSearchQuery))
+    ? userSearchResults.filter((user) => [user.username, user.nombre, user.correo]
+        .some((value) => String(value || '').toLowerCase().includes(normalizedSearchQuery)))
     : userSearchResults;
   const displayedMovieSearchResults = movieSearchResults.slice(0, 8);
   const favoriteSlots = Array.from(
@@ -1121,7 +1058,7 @@ export const Social = () => {
                   {isOwnProfile ? (
                     <Link
                       to="/social/editarPerfil"
-                      className="mt-3 inline-flex items-center gap-2 rounded-lg bg-[#2a6bb7] px-4 py-2 text-base font-bold text-white transition-colors hover:bg-[#2f77c9]"
+                      className="mt-3 inline-flex min-h-11 items-center gap-2 rounded-lg bg-[#2a6bb7] px-4 py-2 text-base font-bold text-white transition-colors hover:bg-[#2f77c9]"
                     >
                       <PencilLine className="h-4 w-4" />
                       {isRegistered ? 'Editar Perfil' : 'Modo invitado'}

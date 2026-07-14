@@ -4,18 +4,9 @@ import Footer from './Footer.jsx';
 import { MapPin, Clock, X } from 'lucide-react';
 import { getCinemas } from './filmateApi';
 
-const fallbackCines = [
-  {
-    id: 1,
-    nombre: 'Filmate Jirón de la Unión',
-    direccion: 'Jr. de la Unión 870, Cercado de Lima, Lima, Perú',
-    horarios: 'Lunes a Domingo - 10:00 a.m. a 10:00 p.m.',
-  },
-];
-
 export const Cines = () => {
   const [selectedCine, setSelectedCine] = useState(null);
-  const [cinesData, setCinesData] = useState(fallbackCines);
+  const [cinesData, setCinesData] = useState([]);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
 
@@ -29,18 +20,13 @@ export const Cines = () => {
 
         if (!isMounted) return;
 
-        if (cinemas.length > 0) {
-          setCinesData(cinemas);
-          setError('');
-        } else {
-          setCinesData(fallbackCines);
-          setError('La API no devolvió cines, se muestran datos locales.');
-        }
+        setCinesData(cinemas);
+        setError(cinemas.length ? '' : 'No hay cines disponibles en este momento.');
       } catch (err) {
         if (!isMounted) return;
 
-        setCinesData(fallbackCines);
-        setError('No se pudo conectar con el backend, se muestran datos locales.');
+        setCinesData([]);
+        setError(err?.message || 'No se pudo cargar el listado de cines.');
         console.error('Error cargando cines:', err);
       } finally {
         if (isMounted) {
@@ -71,8 +57,8 @@ export const Cines = () => {
     <div className="min-h-screen bg-slate-950 flex flex-col">
       <Header />
 
-      <div className="flex-1 w-full px-4 sm:px-6 lg:px-8 py-12">
-        <h1 className="text-4xl font-bold text-white text-center mb-12">Nuestros locales</h1>
+      <main className="w-full flex-1 px-4 py-8 sm:px-6 sm:py-12 lg:px-8">
+        <h1 className="mb-8 text-center text-3xl font-bold text-white sm:mb-12 sm:text-4xl">Nuestros locales</h1>
 
         {error && (
           <div className="mb-8 rounded-2xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-amber-100">
@@ -83,15 +69,15 @@ export const Cines = () => {
         <div className="space-y-8">
           {loading && cinesData.length === 0 ? (
             <div className="text-gray-300">Cargando cines...</div>
-          ) : (
+          ) : cinesData.length > 0 ? (
             cinesData.map((cine) => (
               <div
                 key={cine.id}
                 className="bg-slate-900 rounded-lg overflow-hidden border border-slate-700 hover:border-blue-500 transition-colors duration-300"
               >
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 p-6">
+                <div className="grid grid-cols-1 gap-5 p-4 sm:p-6 lg:grid-cols-2 lg:gap-6">
                   <div>
-                    <div className="bg-slate-800 rounded-lg overflow-hidden h-96 hover:opacity-80 transition-opacity">
+                    <div className="h-56 overflow-hidden rounded-lg bg-slate-800 transition-opacity hover:opacity-80 sm:h-72 lg:h-96">
                       <iframe
                         title={`Mapa de ${cine.nombre}`}
                         width="100%"
@@ -106,7 +92,14 @@ export const Cines = () => {
                   </div>
 
                   <div className="flex flex-col justify-center space-y-6">
-                    <h2 className="text-2xl font-bold text-white">{cine.nombre}</h2>
+                    <div className="flex flex-wrap items-center gap-3">
+                      <h2 className="text-2xl font-bold text-white">{cine.nombre}</h2>
+                      {cine.estado && (
+                        <span className="rounded-full border border-sky-400/30 bg-sky-400/10 px-3 py-1 text-xs font-bold text-sky-200">
+                          {cine.estado}
+                        </span>
+                      )}
+                    </div>
 
                     <div className="space-y-4">
                       <div className="flex gap-4">
@@ -119,6 +112,11 @@ export const Cines = () => {
                           </p>
                         </div>
                       </div>
+                      {cine.observaciones && (
+                        <p className="rounded-lg border border-slate-700 bg-slate-800 px-4 py-3 text-sm text-slate-300">
+                          {cine.observaciones}
+                        </p>
+                      )}
 
                       <div className="flex gap-4">
                         <div className="flex-shrink-0">
@@ -135,7 +133,7 @@ export const Cines = () => {
 
                     <button
                       onClick={() => handleMapClick(cine)}
-                      className="mt-4 bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-6 rounded-lg transition-colors duration-300 w-fit"
+                      className="mt-2 w-full rounded-lg bg-blue-600 px-6 py-3 font-semibold text-white transition-colors duration-300 hover:bg-blue-700 sm:mt-4 sm:w-fit sm:py-2"
                     >
                       Ver en Google Maps
                     </button>
@@ -143,24 +141,29 @@ export const Cines = () => {
                 </div>
               </div>
             ))
+          ) : (
+            <div className="rounded-xl border border-dashed border-slate-700 px-6 py-12 text-center text-slate-400">
+              No hay sedes para mostrar.
+            </div>
           )}
         </div>
-      </div>
+      </main>
 
       {selectedCine && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
-          <div className="bg-slate-900 rounded-lg w-full max-w-4xl max-h-[90vh] overflow-hidden border border-slate-700">
-            <div className="flex justify-between items-center p-6 border-b border-slate-700 bg-slate-800">
-              <h2 className="text-2xl font-bold text-white">{selectedCine.nombre}</h2>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4" role="dialog" aria-modal="true" aria-labelledby="cinema-map-title">
+          <div className="flex max-h-[92dvh] w-full max-w-4xl flex-col overflow-hidden rounded-lg border border-slate-700 bg-slate-900">
+            <div className="flex items-center justify-between gap-3 border-b border-slate-700 bg-slate-800 p-4 sm:p-6">
+              <h2 id="cinema-map-title" className="min-w-0 truncate text-lg font-bold text-white sm:text-2xl">{selectedCine.nombre}</h2>
               <button
                 onClick={closeModal}
+                aria-label="Cerrar mapa"
                 className="text-slate-400 hover:text-white transition-colors"
               >
                 <X className="w-6 h-6" />
               </button>
             </div>
 
-            <div className="w-full h-[70vh]">
+            <div className="h-[52dvh] min-h-64 w-full sm:h-[62dvh]">
               <iframe
                 title={`Mapa completo de ${selectedCine.nombre}`}
                 width="100%"
@@ -173,7 +176,7 @@ export const Cines = () => {
               ></iframe>
             </div>
 
-            <div className="p-6 bg-slate-800 border-t border-slate-700">
+            <div className="max-h-40 overflow-y-auto border-t border-slate-700 bg-slate-800 p-4 text-sm sm:p-6 sm:text-base">
               <p className="text-slate-300 mb-2">
                 <span className="font-semibold text-white">Dirección:</span> {selectedCine.direccion}
               </p>

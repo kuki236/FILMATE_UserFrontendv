@@ -1,43 +1,49 @@
-.App {
-  text-align: center;
-}
-
-.App-logo {
-  height: 40vmin;
-  pointer-events: none;
-}
-
-@media (prefers-reduced-motion: no-preference) {
-  .App-logo {
-    animation: App-logo-spin infinite 20s linear;
-  }
-}
-
-.App-header {
-  background-color: #282c34;
-  min-height: 100vh;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  font-size: calc(10px + 2vmin);
-  color: white;
-}
-
-.App-link {
-  color: #61dafb;
-}
-
 html {
+  min-width: 320px;
   overflow-y: auto;
+  overflow-x: hidden;
   scrollbar-gutter: stable;
   scrollbar-width: thin;
   scrollbar-color: #475569 #020617;
+  -webkit-text-size-adjust: 100%;
 }
 
 body {
+  min-width: 320px;
+  min-height: 100dvh;
+  overflow-x: hidden;
   scrollbar-gutter: stable;
   background-color: #020617;
+}
+
+#root {
+  min-height: 100dvh;
+}
+
+button,
+a,
+input,
+select,
+textarea,
+[role='button'] {
+  touch-action: manipulation;
+}
+
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+[role='button']:focus-visible {
+  outline: 3px solid #38bdf8;
+  outline-offset: 3px;
+}
+
+img,
+svg,
+video,
+iframe {
+  max-width: 100%;
 }
 
 html::-webkit-scrollbar,
@@ -87,11 +93,21 @@ body::-webkit-scrollbar-thumb:hover {
   }
 }
 
-@keyframes App-logo-spin {
-  from {
-    transform: rotate(0deg);
+@media (max-width: 767px) {
+  body.filmate-mobile-nav-active {
+    padding-bottom: calc(74px + env(safe-area-inset-bottom));
   }
-  to {
-    transform: rotate(360deg);
+
+  button,
+  [role='button'] {
+    min-width: 46px;
+    min-height: 46px;
+  }
+
+  input,
+  select,
+  textarea {
+    min-height: 44px;
+    font-size: 16px;
   }
 }

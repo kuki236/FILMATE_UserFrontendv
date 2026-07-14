@@ -26,8 +26,8 @@ export default defineConfig({
       use: { ...devices['Desktop Chrome'] },
     },
     {
-      name: 'mobile-chrome',
-      use: { ...devices['Pixel 7'] },
+      name: 'iphone-15-pro-max',
+      use: { ...devices['iPhone 15 Pro Max'] },
     },
   ],
 });

@@ -39,6 +39,15 @@ const waitForUrl = async (url, label, timeoutMs = 60_000) => {
   throw new Error(`${label} did not become ready at ${url}`);
 };
 
+const waitForProcess = (child, label) =>
+  new Promise((resolve, reject) => {
+    child.on('exit', (code) => {
+      if (code === 0) resolve();
+      else reject(new Error(`${label} finalizó con código ${code ?? 1}`));
+    });
+    child.on('error', reject);
+  });
+
 const killTree = (child) =>
   new Promise((resolve) => {
     if (!child?.pid || child.exitCode !== null || child.signalCode) {
@@ -68,14 +77,21 @@ const cleanup = async () => {
 };
 
 const run = async () => {
+  const build = spawnNode(['node_modules/vite/bin/vite.js', 'build'], {
+    VITE_API_URL: '/api',
+    VITE_WS_URL: '',
+    VITE_DISABLE_WEBSOCKET: 'true',
+  });
+  await waitForProcess(build, 'La build de producción');
+
   spawnNode(['scripts/manual/mock-server.mjs'], {
     MOCK_API_PORT: String(API_PORT),
   });
 
   await waitForUrl(`${API_URL}/health`, 'Mock API', 30_000);
 
-  spawnNode(['node_modules/vite/bin/vite.js', '--host', '127.0.0.1', '--port', String(APP_PORT)], {
-    VITE_API_URL: API_URL,
+  spawnNode(['node_modules/vite/bin/vite.js', 'preview', '--host', '127.0.0.1', '--port', String(APP_PORT)], {
+    VITE_PROXY_TARGET: API_URL,
   });
 
   await waitForUrl(APP_URL, 'Vite app', 60_000);

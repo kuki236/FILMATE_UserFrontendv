@@ -1,19 +1,19 @@
+import { getAccessToken } from './authSession';
+
 const DEFAULT_API_URL = '/api';
 const DEFAULT_REQUEST_TIMEOUT_MS = 15000;
 
 const API_BASE_URL = (import.meta.env.VITE_API_URL || DEFAULT_API_URL).replace(/\/$/, '');
 
 const getWsBaseUrl = () => {
+  if (import.meta.env.VITE_DISABLE_WEBSOCKET === 'true') return '';
+
   const configured = import.meta.env.VITE_WS_URL;
   if (configured) return configured.replace(/\/$/, '');
 
   if (globalThis.window === undefined) return '';
 
   const { location } = globalThis.window;
-
-  if (API_BASE_URL === '/api' && ['localhost', '127.0.0.1'].includes(location.hostname)) {
-    return 'ws://127.0.0.1:8000';
-  }
 
   const apiPathSeparator = API_BASE_URL.startsWith('/') ? '' : '/';
   const apiUrl = API_BASE_URL.startsWith('http')
@@ -30,6 +30,15 @@ const ERROR_TRANSLATIONS = {
   'Invalid credentials': 'Correo o contraseña incorrectos.',
   'User account is not active': 'La cuenta no está activa.',
 };
+
+export class ApiError extends Error {
+  constructor(message, { status = 0, body = null, cause } = {}) {
+    super(message, { cause });
+    this.name = 'ApiError';
+    this.status = status;
+    this.body = body;
+  }
+}
 
 const toReadableMessage = (value) => {
   if (typeof value === 'string') {
@@ -58,36 +67,68 @@ const toReadableMessage = (value) => {
 };
 
 async function request(path, options) {
-  const { timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS, ...requestOptions } = options ?? {};
-  const baseHeaders = { 'Content-Type': 'application/json' };
+  const {
+    timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS,
+    responseType = 'json',
+    authenticated = true,
+    ...requestOptions
+  } = options ?? {};
+  const baseHeaders = { Accept: 'application/json' };
+  const hasBody = requestOptions.body !== undefined && requestOptions.body !== null;
+  const isFormData = typeof FormData !== 'undefined' && requestOptions.body instanceof FormData;
+  if (hasBody && !isFormData) {
+    baseHeaders['Content-Type'] = 'application/json';
+  }
+
+  const accessToken = getAccessToken();
+  if (authenticated && accessToken) {
+    baseHeaders.Authorization = `Bearer ${accessToken}`;
+  }
+
   const headers = requestOptions.headers
     ? { ...baseHeaders, ...requestOptions.headers }
     : baseHeaders;
   const controller = new AbortController();
-  const timeoutId = globalThis.setTimeout(() => controller.abort(), timeoutMs);
+  const externalSignal = requestOptions.signal;
+  let didTimeout = false;
+  const handleExternalAbort = () => controller.abort(externalSignal?.reason);
+  externalSignal?.addEventListener('abort', handleExternalAbort, { once: true });
+  if (externalSignal?.aborted) handleExternalAbort();
+  const timeoutId = globalThis.setTimeout(() => {
+    didTimeout = true;
+    controller.abort();
+  }, timeoutMs);
   let response;
 
   try {
     response = await fetch(`${API_BASE_URL}${path}`, {
       ...requestOptions,
       headers,
-      signal: requestOptions.signal || controller.signal,
+      signal: controller.signal,
     });
   } catch (error) {
-    if (error?.name === 'AbortError') {
-      throw new Error('La solicitud tardó demasiado. Verifica que el backend esté ejecutándose.', { cause: error });
+    if (didTimeout) {
+      throw new ApiError('La solicitud tardó demasiado. Intenta nuevamente.', { cause: error });
     }
 
-    throw error;
+    if (error?.name === 'AbortError') {
+      throw error;
+    }
+
+    throw new ApiError('No se pudo conectar con Filmate. Revisa tu conexión e intenta nuevamente.', {
+      cause: error,
+    });
   } finally {
     globalThis.clearTimeout(timeoutId);
+    externalSignal?.removeEventListener('abort', handleExternalAbort);
   }
 
   if (!response.ok) {
     const raw = await response.text().catch(() => '');
+    let parsed = null;
     let message = raw || `Error en la petición (${response.status})`;
     try {
-      const parsed = raw ? JSON.parse(raw) : null;
+      parsed = raw ? JSON.parse(raw) : null;
       message = toReadableMessage(parsed?.detail) || toReadableMessage(parsed?.message) || toReadableMessage(parsed) || message;
     } catch {
       // Keep the raw response text when the body is not JSON.
@@ -95,11 +136,15 @@ async function request(path, options) {
 
     message = ERROR_TRANSLATIONS[message] || message;
 
-    throw new Error(message);
+    throw new ApiError(message, { status: response.status, body: parsed ?? raw });
   }
 
   if (response.status === 204) {
     return {};
+  }
+
+  if (responseType === 'blob') {
+    return response.blob();
   }
 
   const raw = await response.text().catch(() => '');
@@ -114,20 +159,6 @@ async function request(path, options) {
   }
 }
 
-async function requestFirstAvailable(paths, options = {}) {
-  let lastError = null;
-
-  for (const path of paths) {
-    try {
-      return await request(path, options);
-    } catch (error) {
-      lastError = error;
-    }
-  }
-
-  throw lastError || new Error('No se pudo completar la peticion.');
-}
-
 const asArray = (value) => (Array.isArray(value) ? value : []);
 
 const asPayloadArray = (value, keys = []) => {
@@ -138,45 +169,6 @@ const asPayloadArray = (value, keys = []) => {
   }
 
   return [];
-};
-
-const parseConfigValue = (value, type = '') => {
-  if (value === undefined || value === null) return value;
-  if (type === 'number') return Number(value);
-  if (type === 'boolean') return value === true || value === 'true' || value === '1';
-  if (type === 'json') {
-    try {
-      return typeof value === 'string' ? JSON.parse(value) : value;
-    } catch {
-      return value;
-    }
-  }
-
-  return value;
-};
-
-const normalizeSystemConfig = (data) => {
-  const entries = asPayloadArray(data, ['results', 'configuracion', 'config', 'items']);
-  const configMap = entries.reduce((acc, item) => {
-    const key = item?.clave || item?.key || item?.nombre;
-    if (!key) return acc;
-
-    acc[key] = parseConfigValue(item.valor ?? item.value, item.tipo_dato || item.type);
-    return acc;
-  }, {});
-
-  const source = entries.length ? configMap : data || {};
-
-  return {
-    preciosFormato: source.precios_formato || source.preciosFormato || {},
-    tiposEntrada: source.tipos_entrada || source.tiposEntrada || [],
-    tasaServicio: Number(source.tasa_servicio ?? source.tasaServicio ?? 0),
-    ivaPorcentaje: Number(source.iva_porcentaje ?? source.ivaPorcentaje ?? 0),
-    limiteAsientosPorTransaccion: Number(source.limite_asientos_por_transaccion ?? source.limiteAsientosPorTransaccion ?? 10),
-    tiempoBloqueoAsientosMinutos: Number(source.tiempo_bloqueo_asientos_minutos ?? source.tiempoBloqueoAsientosMinutos ?? 10),
-    horasAnticipacionMinimas: Number(source.horas_anticipacion_minimas ?? source.horasAnticipacionMinimas ?? 1),
-    diasAnticipacionMaximos: Number(source.dias_anticipacion_maximos ?? source.diasAnticipacionMaximos ?? 7),
-  };
 };
 
 const formatDuration = (minutes) => {
@@ -226,6 +218,58 @@ const parseTextList = (value) => {
   return text.split(',').map((item) => item.trim()).filter(Boolean);
 };
 
+const getMovieRatingValue = (movie) => {
+  const candidates = [
+    movie?.promedio_resenas,
+    movie?.promedio_calificacion,
+    movie?.calificacion_promedio,
+    movie?.promedio_puntuacion,
+    movie?.puntuacion_promedio,
+    movie?.promedio_estrellas,
+    movie?.rating,
+    movie?.rating_promedio,
+    movie?.rating_avg,
+    movie?.ratingAverage,
+  ];
+
+  for (const candidate of candidates) {
+    if (candidate === undefined || candidate === null || candidate === '') continue;
+
+    const numericValue = Number(candidate);
+    if (Number.isFinite(numericValue) && numericValue >= 0) {
+      return numericValue;
+    }
+  }
+
+  return 0;
+};
+
+const normalizeMovieRating = (movie) => {
+  const ratingValue = getMovieRatingValue(movie);
+  return ratingValue === 0
+    ? 0
+    : Math.round((ratingValue || 0) * 2) / 2;
+};
+
+const getMovieReviewAverage = async (movie) => {
+  const movieId = movie?.id ?? movie?.id_pelicula;
+  if (!movieId) return null;
+
+  try {
+    const data = await request(`/client/reviews/movie/${movieId}`);
+    const reviews = asPayloadArray(data, ['results', 'reviews', 'resenas', 'items']);
+    const ratings = reviews
+      .map((review) => Number(review?.puntuacion_estrellas ?? review?.rating ?? review?.calificacion ?? review?.estrellas ?? 0))
+      .filter((value) => Number.isFinite(value) && value >= 1 && value <= 5);
+
+    if (!ratings.length) return null;
+
+    return Math.round((ratings.reduce((sum, value) => sum + value, 0) / ratings.length) * 2) / 2;
+  } catch {
+    return null;
+  }
+};
+
 export function normalizeMovie(movie) {
   if (!movie) return movie;
 
@@ -266,10 +310,7 @@ export function normalizeMovie(movie) {
     directorsFromRelations.join(', ') ||
     (typeof movie.directores === 'string' ? movie.directores : '') ||
     'Por definir';
-  const ratingValue = movie.promedio_resenas ?? movie.rating;
-  const normalizedRating = ratingValue === undefined || ratingValue === null
-    ? (((movie.id_pelicula || movie.id || 0) % 5) + 1)
-    : Math.round((Number(ratingValue) || 0) * 2) / 2;
+  const normalizedRating = normalizeMovieRating(movie);
 
   return {
     id: movie.id_pelicula || movie.id,
@@ -293,7 +334,7 @@ export function normalizeMovie(movie) {
     reparto: reparto.join(', ') || 'Por definir',
     estreno: movie.categoria_cartelera === 'Estreno',
     categoriaCartelera: movie.categoria_cartelera,
-    estadoRegistro: movie.estado_registro,
+    estadoRegistro: movie.estado_registro || movie.estado_pelicula,
     fechaCreacion: movie.fecha_creacion,
     generos,
     actores: reparto,
@@ -311,6 +352,7 @@ export function normalizeCinema(cinema) {
     horarios: cinema.horarios_apertura || cinema.horarios || 'Lunes a Domingo - 10:00 a.m. a 10:00 p.m.',
     mapa: cinema.url_mapa_embebido || '',
     estado: cinema.estado_cine || cinema.estado,
+    observaciones: cinema.observaciones || '',
   };
 }
 
@@ -370,6 +412,8 @@ export function normalizeUser(user) {
 
   return {
     ...user,
+    id_usuario: user.id_usuario ?? user.id ?? user.user_id,
+    id: user.id ?? user.id_usuario ?? user.user_id,
     nombre,
     nombres: user.nombres || nombre,
     username: user.username || user.nombreUsuario || user.nombre_usuario,
@@ -411,7 +455,7 @@ export function normalizeSnackProduct(product, categoriesById = {}) {
     descripcion: product.descripcion || 'Sin descripcion disponible.',
     precio: Number(product.precio || 0),
     imagen: product.url_imagen || '',
-    stock: product.stock,
+    stock: Number(product.stock || 0),
   };
 }
 
@@ -508,6 +552,7 @@ export function normalizeMovieReview(review, user = null) {
     ),
     texto: review?.comentario || review?.texto || '',
     likes: Number(review?.likes ?? review?.total_likes ?? review?.totalLikes ?? review?.me_gusta ?? 0),
+    totalComments: Number(review?.total_comentarios ?? review?.totalComments ?? 0),
     likedByMe: Boolean(review?.liked_by_me ?? review?.likedByMe ?? review?.me_gusta_usuario),
     fechaPublicacion:
       review?.fecha_publicacion ||
@@ -516,6 +561,18 @@ export function normalizeMovieReview(review, user = null) {
       review?.fecha_creacion ||
       null,
     movie: normalizeMovie(review?.pelicula || review?.movie || review?.pelicula_resenada || null),
+  };
+}
+
+export function normalizeReviewComment(comment) {
+  return {
+    id: comment?.id_comentario || comment?.id,
+    reviewId: comment?.id_resena || comment?.reviewId,
+    userId: comment?.id_usuario || comment?.userId,
+    username: comment?.username || comment?.nombre_usuario || 'Usuario',
+    avatar: comment?.url_perfil || comment?.avatar || '',
+    text: comment?.texto || comment?.text || '',
+    createdAt: comment?.fecha_comentario || comment?.createdAt || null,
   };
 }
 
@@ -559,6 +616,7 @@ export function normalizePurchase(purchase) {
   const snacks = asPayloadArray(
     purchase.snacks ||
       purchase.confiteria ||
+      purchase.productos_confiteria ||
       purchase.detalle_confiteria ||
       purchase.detalleBoletaConfiteria ||
       transaction.snacks,
@@ -590,6 +648,12 @@ export function normalizePurchase(purchase) {
       purchase.total_pago ??
       0
   );
+  const snackSubtotal = snacks.reduce((sum, item) => {
+    const product = item.producto || item.product || item;
+    const quantity = Number(item.cantidad || 1);
+    const price = Number(item.precio_unitario ?? product.precio ?? item.precio ?? 0);
+    return sum + (quantity * price);
+  }, 0);
 
   return {
     id: String(id || Date.now()),
@@ -598,6 +662,7 @@ export function normalizePurchase(purchase) {
     createdAt:
       transaction.fecha_transaccion ||
       purchase.fecha_transaccion ||
+      purchase.fecha ||
       purchase.fecha_compra ||
       purchase.createdAt ||
       purchase.fecha_emision ||
@@ -610,15 +675,21 @@ export function normalizePurchase(purchase) {
       ? {
           pelicula: movieTitle,
           sede: cinema?.nombre_cine || cinema?.nombre || purchase.nombre_cine || purchase.sede || '',
-          horario: purchase.funcion?.fecha_hora || transaction.funcion?.fecha_hora || purchase.fecha_hora || '',
+          horario:
+            purchase.funcion?.fecha_hora ||
+            transaction.funcion?.fecha_hora ||
+            purchase.fecha_hora_funcion ||
+            purchase.fecha_hora ||
+            '',
           sala: room?.nombre_sala || room?.nombre || purchase.nombre_sala || '',
           asientos: seats
             .map((seat) => seat?.codigo || seat?.nombre || [seat?.fila, seat?.columna].filter(Boolean).join('') || seat?.id_asiento)
             .filter(Boolean),
           seatIds: seats.map((seat) => seat?.id_asiento || seat?.id).filter(Boolean),
-          subtotal: Number(transaction.monto_boletos ?? purchase.monto_boletos ?? 0),
+          subtotal: Number(transaction.monto_boletos ?? purchase.monto_boletos ?? Math.max(0, total - snackSubtotal)),
         }
       : null,
+    pdfUrl: purchase.pdf_url || transaction.pdf_url || '',
     snacks: snacks.map((item) => {
       const product = item.producto || item.product || item;
       const cantidad = Number(item.cantidad || 1);
@@ -635,7 +706,7 @@ export function normalizePurchase(purchase) {
   };
 }
 
-export async function getMovies({ skip = 0, limit = 50, generoId } = {}) {
+export async function getMovies({ skip = 0, limit = 50, generoId, enrichRatings = true } = {}) {
   const query = new URLSearchParams();
   query.set('skip', String(skip));
   query.set('limit', String(limit));
@@ -645,7 +716,25 @@ export async function getMovies({ skip = 0, limit = 50, generoId } = {}) {
   }
 
   const data = await request(`/client/movies/?${query.toString()}`);
-  return Array.isArray(data) ? data.map(normalizeMovie) : [];
+  if (!Array.isArray(data)) return [];
+
+  const movies = data.map(normalizeMovie);
+  if (!enrichRatings) return movies;
+
+  const moviesNeedingRating = movies.filter((movie) => movie && !Number(movie.rating));
+
+  if (!moviesNeedingRating.length) return movies;
+
+  const enrichedMovies = await Promise.all(
+    movies.map(async (movie) => {
+      if (!movie || Number(movie.rating)) return movie;
+
+      const reviewAverage = await getMovieReviewAverage(movie);
+      return reviewAverage === null ? movie : { ...movie, rating: reviewAverage };
+    })
+  );
+
+  return enrichedMovies;
 }
 
 export async function searchMovies(query) {
@@ -684,19 +773,33 @@ export async function updateMovieReview(reviewId, payload) {
   });
 }
 
+export async function getReviewComments(reviewId) {
+  if (!reviewId) return [];
+  const data = await request(`/client/reviews/${reviewId}/comments`);
+  return asArray(data).map(normalizeReviewComment);
+}
+
+export async function createReviewComment(reviewId, payload) {
+  const data = await request(`/client/reviews/${reviewId}/comments`, {
+    method: 'POST',
+    body: JSON.stringify({
+      id_usuario: payload.id_usuario,
+      texto: payload.texto,
+    }),
+  });
+  return normalizeReviewComment(data);
+}
+
 export async function getMovieReviews(movieId, userId = null) {
   if (!movieId) return [];
 
   const query = userId ? `?viewer_id=${encodeURIComponent(userId)}` : '';
-  const data = await requestFirstAvailable([
-    `/client/reviews/movie/${movieId}${query}`,
-    `/client/resenas/movie/${movieId}${query}`,
-    `/client/reviews/movie/${movieId}`,
-  ]);
+  const data = await request(`/client/reviews/movie/${movieId}${query}`);
   const reviews = asPayloadArray(data, ['results', 'reviews', 'resenas', 'items']);
   const userIds = [
     ...new Set(
       reviews
+        .filter((review) => !review?.username && !review?.usuario?.username && !review?.user?.username)
         .map((review) => review?.id_usuario || review?.usuario?.id_usuario || review?.user?.id_usuario)
         .filter(Boolean)
         .map(String)
@@ -742,22 +845,14 @@ export async function getCinemaById(cinemaId) {
 
 export async function getRoomById(roomId) {
   if (!roomId) return null;
-  const data = await request(`/admin/rooms/${roomId}`);
+  const data = await request(`/client/rooms/${roomId}`);
   return normalizeRoom(data);
 }
 
 export async function likeMovieReview(reviewId, userId) {
   if (!reviewId || !userId) return null;
 
-  return requestFirstAvailable([
-    `/client/reviews/${reviewId}/toggle-like`,
-    `/client/reviews/${reviewId}/like`,
-    `/client/reviews/${reviewId}/likes`,
-    `/client/resenas/${reviewId}/like`,
-    `/client/resenas/${reviewId}/likes`,
-    '/client/reviews/like',
-    '/client/resenas/like',
-  ], {
+  return request(`/client/reviews/${reviewId}/toggle-like`, {
     method: 'POST',
     body: JSON.stringify({
       id_usuario: userId,
@@ -765,25 +860,8 @@ export async function likeMovieReview(reviewId, userId) {
   });
 }
 
-export async function rateMovie(payload) {
-  return requestFirstAvailable([
-    '/client/ratings/',
-    '/client/calificaciones/',
-    `/client/movies/${payload.id_pelicula}/rating`,
-  ], {
-    method: 'POST',
-    body: JSON.stringify({
-      id_usuario: payload.id_usuario,
-      id_pelicula: payload.id_pelicula,
-      puntuacion_estrellas: payload.puntuacion_estrellas,
-      calificacion: payload.puntuacion_estrellas,
-      rating: payload.puntuacion_estrellas,
-    }),
-  });
-}
-
 export async function getRooms() {
-  const data = await request('/admin/rooms/');
+  const data = await request('/client/rooms/');
   return asPayloadArray(data, ['results', 'rooms', 'salas', 'items']).map(normalizeRoom);
 }
 
@@ -812,6 +890,16 @@ const extractShowtimeList = (data) => {
   return [];
 };
 
+const SHOWTIME_CACHE_TTL_MS = 30_000;
+const showtimeDateCache = new Map();
+
+const parseShowtimeTimestamp = (value) => {
+  if (!value) return Number.NaN;
+  const normalized = String(value).trim().replace(' ', 'T');
+  const hasExplicitTimezone = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(normalized);
+  return Date.parse(hasExplicitTimezone ? normalized : `${normalized}-05:00`);
+};
+
 export async function getShowtimesByCinema(cinemaId) {
   const data = await request(`/client/showtimes/cinema/${cinemaId}`);
   const funciones = extractShowtimeList(data).map(normalizeShowtime);
@@ -826,7 +914,7 @@ export async function getShowtimesByCinema(cinemaId) {
   return { funciones };
 }
 
-export async function getShowtimesByDate(targetDate, { cinemaId, movieId } = {}) {
+export async function getShowtimesByDate(targetDate, { cinemaId, movieId, forceRefresh = false } = {}) {
   const query = new URLSearchParams();
 
   if (cinemaId !== undefined && cinemaId !== null && cinemaId !== '') {
@@ -839,9 +927,32 @@ export async function getShowtimesByDate(targetDate, { cinemaId, movieId } = {})
 
   const queryString = query.toString();
   const querySuffix = queryString ? `?${queryString}` : '';
-  const data = await request(`/client/showtimes/date/${targetDate}${querySuffix}`);
-  const funciones = Array.isArray(data) ? data : extractShowtimeList(data);
-  return funciones.map(normalizeShowtime);
+  const path = `/client/showtimes/date/${targetDate}${querySuffix}`;
+  const cached = showtimeDateCache.get(path);
+
+  if (!forceRefresh && cached && Date.now() - cached.createdAt < SHOWTIME_CACHE_TTL_MS) {
+    return cached.promise;
+  }
+
+  const promise = request(path)
+    .then((data) => {
+      const funciones = Array.isArray(data) ? data : extractShowtimeList(data);
+      const now = Date.now();
+
+      return funciones
+        .map(normalizeShowtime)
+        .filter((showtime) => {
+          const timestamp = parseShowtimeTimestamp(showtime.fecha_hora || showtime.fecha_hora_inicio || '');
+          return !Number.isFinite(timestamp) || timestamp > now;
+        });
+    })
+    .catch((error) => {
+      showtimeDateCache.delete(path);
+      throw error;
+    });
+
+  showtimeDateCache.set(path, { createdAt: Date.now(), promise });
+  return promise;
 }
 
 export async function getSeatMap(showtimeId) {
@@ -852,10 +963,11 @@ export async function getSeatMap(showtimeId) {
   };
 }
 
-export async function lockSeats(showtimeId, seatIds) {
+export async function lockSeats(userId, showtimeId, seatIds) {
   return request('/client/seats/lock', {
     method: 'POST',
     body: JSON.stringify({
+      id_usuario: userId,
       id_funcion: showtimeId,
       ids_asientos: seatIds,
     }),
@@ -866,12 +978,7 @@ export async function checkoutOrder(payload) {
   const idsAsientos = payload.ids_asientos || payload.asientos || [];
   const snacks = payload.snacks || payload.confiteria || [];
 
-  return requestFirstAvailable([
-    '/client/orders/checkout',
-    '/client/compras/checkout',
-    '/client/checkout',
-    '/client/orders/',
-  ], {
+  return request('/client/orders/checkout', {
     method: 'POST',
     body: JSON.stringify({
       id_usuario: payload.id_usuario,
@@ -879,25 +986,50 @@ export async function checkoutOrder(payload) {
       ids_asientos: idsAsientos,
       snacks,
       monto_confiteria: payload.monto_confiteria || 0,
-      monto_boletos: payload.monto_boletos,
-      monto_subtotal: payload.monto_subtotal,
-      tasa_servicio: payload.tasa_servicio,
-      iva_monto: payload.iva_monto,
       metodo_pago: payload.metodo_pago,
+      token_pago: payload.token_pago,
+      email: payload.email,
     }),
   });
 }
 
-export async function getSystemConfig() {
-  const data = await requestFirstAvailable([
-    '/client/configuracion/sistema',
-    '/client/configuracion',
-    '/client/system/config',
-    '/admin/configuracion-sistema',
-    '/admin/configuracion',
-  ]);
+const ensurePaymentToken = (data) => {
+  if (data?.token) return data;
+  throw new ApiError(data?.error || 'No se pudo validar el método de pago.', {
+    status: 400,
+    body: data,
+  });
+};
 
-  return normalizeSystemConfig(data);
+export async function getPaymentTestMethods() {
+  return request('/client/payments/metodos-prueba');
+}
+
+export async function tokenizeCardPayment(payload) {
+  const data = await request('/client/payments/tokenize/tarjeta', {
+    method: 'POST',
+    body: JSON.stringify({
+      numero_tarjeta: payload.numero_tarjeta,
+      cvv: payload.cvv,
+      mes_expiracion: payload.mes_expiracion,
+      anio_expiracion: payload.anio_expiracion,
+      titular: payload.titular,
+    }),
+  });
+
+  return ensurePaymentToken(data);
+}
+
+export async function tokenizeYapePayment(payload) {
+  const data = await request('/client/payments/tokenize/yape', {
+    method: 'POST',
+    body: JSON.stringify({
+      celular: payload.celular,
+      codigo_otp: payload.codigo_otp,
+    }),
+  });
+
+  return ensurePaymentToken(data);
 }
 
 export async function registerUser(payload) {
@@ -905,6 +1037,7 @@ export async function registerUser(payload) {
 
   return request('/auth/register', {
     method: 'POST',
+    authenticated: false,
     body: JSON.stringify({
       nombre,
       username: payload.username || payload.nombreUsuario || payload.nombre_usuario,
@@ -921,6 +1054,7 @@ export async function registerUser(payload) {
 export async function loginUser(payload) {
   const data = await request('/auth/login', {
     method: 'POST',
+    authenticated: false,
     body: JSON.stringify({
       correo: payload.correo || payload.correo_electronico,
       contrasena: payload.contrasena || payload.password,
@@ -948,10 +1082,7 @@ export async function getSocialSummary(userId) {
     };
   }
 
-  const data = await requestFirstAvailable([
-    `/client/social/summary/${userId}`,
-    `/client/actividad/summary/${userId}`,
-  ]);
+  const data = await request(`/client/social/summary/${userId}`);
 
   return normalizeSocialSummary(data);
 }
@@ -959,18 +1090,12 @@ export async function getSocialSummary(userId) {
 export async function updateSocialProfile(userId, payload) {
   if (!userId) return null;
 
-  const data = await requestFirstAvailable(
-    [
-      `/client/social/profile/${userId}`,
-      `/client/actividad/profile/${userId}`,
-    ],
-    {
-      method: 'PUT',
-      body: JSON.stringify({
-        bio: payload.bio || payload.descripcion || payload.presentacion || '',
-      }),
-    }
-  );
+  const data = await request(`/client/social/profile/${userId}`, {
+    method: 'PUT',
+    body: JSON.stringify({
+      bio: payload.bio || payload.descripcion || payload.presentacion || '',
+    }),
+  });
 
   return {
     ...data,
@@ -997,28 +1122,19 @@ export async function updateUserProfile(userId, payload) {
 
 export async function getFavoriteMovies(userId) {
   if (!userId) return [];
-  const data = await requestFirstAvailable([
-    `/client/users/${userId}/favorite-movies`,
-    `/client/movies/favorites/${userId}`,
-  ]);
+  const data = await request(`/client/users/${userId}/favorite-movies`);
   return asPayloadArray(data, ['results', 'movies', 'peliculas', 'items']).map(normalizeMovie);
 }
 
 export async function updateFavoriteMovies(userId, movieIds) {
   if (!userId) return null;
 
-  return requestFirstAvailable(
-    [
-      `/client/users/${userId}/favorite-movies`,
-      `/client/interacciones/usuario/${userId}/favorite-movies`,
-    ],
-    {
-      method: 'PUT',
-      body: JSON.stringify({
-        movie_ids: asArray(movieIds).slice(0, 5),
-      }),
-    }
-  );
+  return request(`/client/users/${userId}/favorite-movies`, {
+    method: 'PUT',
+    body: JSON.stringify({
+      movie_ids: asArray(movieIds).slice(0, 5),
+    }),
+  });
 }
 
 export async function searchUsers(query) {
@@ -1032,7 +1148,8 @@ export async function searchUsers(query) {
 
   return asPayloadArray(data, ['results', 'users', 'usuarios', 'items'])
     .map(normalizeUser)
-    .filter((user) => String(user.username || '').toLowerCase().includes(queryText))
+    .filter((user) => [user.username, user.nombre, user.correo]
+      .some((value) => String(value || '').toLowerCase().includes(queryText)))
     .sort((firstUser, secondUser) => {
       const firstUsername = String(firstUser.username || '').toLowerCase();
       const secondUsername = String(secondUser.username || '').toLowerCase();
@@ -1057,11 +1174,7 @@ export async function getUserRatedMovies(userId) {
 export async function getUserReviews(userId) {
   if (!userId) return [];
 
-  const data = await requestFirstAvailable([
-    `/client/reviews/user/${userId}`,
-    `/client/resenas/user/${userId}`,
-    `/client/reviews/user/${userId}/list`,
-  ]);
+  const data = await request(`/client/reviews/user/${userId}`);
 
   return asPayloadArray(data, ['results', 'reviews', 'resenas', 'items']).map((review) =>
     normalizeMovieReview(review)
@@ -1071,11 +1184,7 @@ export async function getUserReviews(userId) {
 export async function getFollowingReviews(userId) {
   if (!userId) return [];
 
-  const data = await requestFirstAvailable([
-    `/client/reviews/following/${userId}`,
-    `/client/resenas/following/${userId}`,
-    `/client/social/following/${userId}/reviews`,
-  ]);
+  const data = await request(`/client/reviews/following/${userId}`);
 
   return asPayloadArray(data, ['results', 'reviews', 'resenas', 'items']).map((review) =>
     normalizeMovieReview(review)
@@ -1097,11 +1206,6 @@ export async function updateMovieInteraction(payload) {
       vista: Boolean(payload.vista),
       favorita: Boolean(payload.favorita),
       en_lista_seguimiento: Boolean(payload.en_lista_seguimiento),
-      fecha_vista: payload.fecha_vista,
-      fecha_favorito: payload.fecha_favorito,
-      fecha_favorita: payload.fecha_favorita,
-      puntuacion_estrellas: payload.puntuacion_estrellas,
-      calificacion: payload.calificacion,
     }),
   });
 }
@@ -1123,8 +1227,12 @@ export async function getUserPurchases(userId) {
 
 export async function getMovieInteraction(userId, movieId) {
   if (!userId || !movieId) return null;
-  const interactions = await getUserInteractions(userId);
-  return interactions.find((item) => String(item.id_pelicula) === String(movieId)) || null;
+  try {
+    return await request(`/client/interacciones/usuario/${userId}/pelicula/${movieId}`);
+  } catch (error) {
+    if (error?.status === 404) return null;
+    throw error;
+  }
 }
 
 export async function getFollowers(userId) {
@@ -1154,14 +1262,10 @@ export async function followUser(followerId, followedId) {
 export async function unfollowUser(followerId, followedId) {
   if (!followerId || !followedId) return null;
 
-  return requestFirstAvailable([
-    '/client/seguidores/dejar-de-seguir',
-    '/client/seguidores/unfollow',
-  ], {
+  return request('/client/seguidores/dejar-de-seguir', {
     method: 'POST',
     body: JSON.stringify({
       id_usuario: followerId,
-      id_dejar_seguir: followedId,
       id_seguir: followedId,
     }),
   });
@@ -1181,6 +1285,71 @@ export async function getSnackProducts() {
     categories,
     products: asArray(data).map((product) => normalizeSnackProduct(product, categoriesById)),
   };
+}
+
+export async function downloadTicketPdf(transactionId) {
+  if (!transactionId) {
+    throw new ApiError('No se encontró una transacción para descargar.');
+  }
+
+  return request(`/client/tickets/transaction/${transactionId}/pdf`, {
+    responseType: 'blob',
+    headers: { Accept: 'application/pdf' },
+    timeoutMs: 30_000,
+  });
+}
+
+export async function calculateSnackCart(items) {
+  const normalizedItems = asArray(items).map((item) => ({
+    id_producto: item.id_producto ?? item.id,
+    cantidad: Number(item.cantidad || 0),
+  }));
+
+  return request('/client/snacks/cart/calculate', {
+    method: 'POST',
+    body: JSON.stringify({ items: normalizedItems }),
+  });
+}
+
+export async function getUserCollections(userId) {
+  if (!userId) return [];
+  return request(`/client/colecciones/usuario/${userId}`);
+}
+
+export async function getCollectionMovies(collectionId) {
+  if (!collectionId) return [];
+  return request(`/client/colecciones/${collectionId}/peliculas`);
+}
+
+export async function createCollection(payload) {
+  return request('/client/colecciones/', {
+    method: 'POST',
+    body: JSON.stringify({
+      id_usuario: payload.id_usuario,
+      titulo_coleccion: payload.titulo_coleccion,
+      descripcion: payload.descripcion || null,
+    }),
+  });
+}
+
+export async function deleteCollection(collectionId) {
+  return request(`/client/colecciones/${collectionId}`, { method: 'DELETE' });
+}
+
+export async function addMovieToCollection(collectionId, movieId) {
+  return request('/client/colecciones/agregar-pelicula', {
+    method: 'POST',
+    body: JSON.stringify({
+      id_coleccion: collectionId,
+      id_pelicula: movieId,
+    }),
+  });
+}
+
+export async function removeMovieFromCollection(collectionId, movieId) {
+  return request(`/client/colecciones/${collectionId}/pelicula/${movieId}`, {
+    method: 'DELETE',
+  });
 }
 
 export function createSeatWebSocket(showtimeId) {
