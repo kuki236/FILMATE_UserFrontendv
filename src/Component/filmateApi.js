@@ -1,7 +1,7 @@
 import { getAccessToken } from './authSession';
 
 const DEFAULT_API_URL = '/api';
-const DEFAULT_REQUEST_TIMEOUT_MS = 15000;
+const DEFAULT_REQUEST_TIMEOUT_MS = 60000;
 
 const API_BASE_URL = (import.meta.env.VITE_API_URL || DEFAULT_API_URL).replace(/\/$/, '');
 

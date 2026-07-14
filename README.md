@@ -78,16 +78,41 @@ Sirve la build de produccion de forma local.
 
 ## Despliegue
 
-La configuración recomendada es servir frontend y backend bajo el mismo dominio:
+El frontend se despliega en **Vercel**, el backend en **Render** y la base de datos en **Railway**.
 
-- `/` sirve el contenido de `dist/`.
-- `/api/*` se reenvía al backend eliminando el prefijo `/api`.
-- `/api/ws/*` se reenvía como WebSocket al backend eliminando el prefijo `/api`.
-- Toda ruta que no sea un archivo ni API debe responder con `dist/index.html`, porque la aplicación usa `BrowserRouter`.
+### Arquitectura
 
-La build está preparada para publicarse en la raíz del dominio. Si se necesita una subruta como `/filmate/`, primero deben configurarse el `base` de Vite, el `basename` del router y las rutas de recursos estáticos.
+```
+Vercel (frontend)  ──>  Render (backend FastAPI)  ──>  Railway (MySQL)
+```
 
-El backend actual no configura CORS. Si frontend y backend se publican en dominios distintos, el backend deberá autorizar explícitamente el origen del frontend; definir solamente `VITE_API_URL` no evita esa restricción del navegador.
+El archivo `vercel.json` ya está configurado para reenviar todas las requests `/api/*` al backend en Render:
+
+```json
+{
+  "rewrites": [
+    { "source": "/api/:path*", "destination": "https://filmate-backendv.onrender.com/:path*" },
+    { "source": "/(.*)", "destination": "/index.html" }
+  ]
+}
+```
+
+### URLs de despliegue
+
+| Recurso | URL |
+|---|---|
+| Frontend (Vercel) | `https://filmate.vercel.app` |
+| Backend (Render) | `https://filmate-backendv.onrender.com` |
+| API Docs | `https://filmate-backendv.onrender.com/api/docs` |
+| Base de datos | Railway (MySQL) |
+
+### Variables de entorno en Vercel
+
+| Variable | Valor |
+|---|---|
+| `VITE_API_URL` | `/api` (usa el rewrite del `vercel.json`) |
+
+No se necesita configurar `VITE_API_URL` con la URL completa del backend porque Vercel redirige `/api/*` a Render mediante los rewrites.
 
 Antes de desplegar:
 
